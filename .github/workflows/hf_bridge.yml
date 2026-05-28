@@ -32,7 +32,7 @@ jobs:
           api.upload_file(
               path_or_fileobj='${{ inputs.filename }}',
               path_in_repo='${{ inputs.filename }}',
-              repo_id='YOUR_HF_USERNAME/YOUR_DATASET_NAME',
+              repo_id='Arashm1386/my-storage',
               repo_type='dataset',
               token='${{ env.HF_TOKEN }}'
           )"      
