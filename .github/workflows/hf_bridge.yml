@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       filename:
-        description: 'Filename (e.g. model.safetensors)'
+        description: 'Filename (e.g. model.gguf)'
         required: true
         default: 'model.safetensors'
       hf_repo:
-        description: 'Your HuggingFace Dataset Name (e.g. my-storage)'
+        description: 'Your HuggingFace Dataset Name'
         required: true
         default: 'my-storage'
 
@@ -23,79 +23,51 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y aria2 curl
+          sudo apt-get install -y wget
           pip install huggingface_hub
-
-      - name: Get Real Download URL
-        id: get_url
-        env:
-          CIVITAI_TOKEN: ${{ secrets.CIVITAI_API_KEY }}
-        run: |
-          echo "Resolving real download URL..."
-          
-          # Follow the redirect manually to get the final B2 URL
-          REAL_URL=$(curl -sI \
-            -H "Authorization: Bearer $CIVITAI_TOKEN" \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -L \
-            "${{ inputs.civitai_url }}" | grep -i "^location:" | tail -1 | tr -d '\r' | sed 's/location: //i')
-          
-          # If no redirect found use original URL
-          if [ -z "$REAL_URL" ]; then
-            echo "No redirect found, using original URL"
-            REAL_URL="${{ inputs.civitai_url }}"
-          fi
-          
-          echo "Real URL: $REAL_URL"
-          echo "real_url=$REAL_URL" >> $GITHUB_OUTPUT
 
       - name: Download from Civitai
         env:
           CIVITAI_TOKEN: ${{ secrets.CIVITAI_API_KEY }}
+          CIVITAI_URL: ${{ inputs.civitai_url }}
+          FILENAME: ${{ inputs.filename }}
         run: |
           echo "Starting download..."
           
-          # Try aria2 with the real B2 URL first (no auth header needed for B2)
-          aria2c -x 16 -s 16 \
-            --max-tries=5 \
-            --retry-wait=3 \
-            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -o "${{ inputs.filename }}" \
-            "${{ steps.get_url.outputs.real_url }}" || \
-          
-          # If that fails, fall back to wget which handles redirects better
           wget \
             --header="Authorization: Bearer $CIVITAI_TOKEN" \
-            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
             --content-disposition \
-            --trust-server-names \
-            -O "${{ inputs.filename }}" \
-            "${{ inputs.civitai_url }}"
+            -O "$FILENAME" \
+            "$CIVITAI_URL"
           
           echo ""
           echo "=== Download Complete ==="
-          echo "File size: $(du -h ${{ inputs.filename }} | cut -f1)"
+          ls -lh "$FILENAME"
 
       - name: Upload to HuggingFace
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          FILENAME: ${{ inputs.filename }}
+          HF_REPO: ${{ inputs.hf_repo }}
         run: |
           echo "Uploading to HuggingFace..."
-          python3 -c "
+          python3 << 'EOF'
           from huggingface_hub import HfApi
           import os
 
           api = HfApi()
-          token = os.environ['HF_TOKEN']
+          token = os.environ["HF_TOKEN"]
+          filename = os.environ["FILENAME"]
+          repo = os.environ["HF_REPO"]
 
           api.upload_file(
-              path_or_fileobj='${{ inputs.filename }}',
-              path_in_repo='${{ inputs.filename }}',
-              repo_id='Arashm1386/${{ inputs.hf_repo }}',
-              repo_type='dataset',
+              path_or_fileobj=filename,
+              path_in_repo=filename,
+              repo_id=f"Arashm1386/{repo}",
+              repo_type="dataset",
               token=token
           )
-          print('Upload complete!')
-          print('File available at:')
-          print(f'https://huggingface.co/datasets/Arashm1386/${{ inputs.hf_repo }}/resolve/main/${{ inputs.filename }}')
-          "
+          print("Upload complete!")
+          print(f"https://huggingface.co/datasets/Arashm1386/{repo}/resolve/main/{filename}")
+          EOF
