@@ -1,38 +1,66 @@
-name: Huge File to HuggingFace
+name: Civitai to HuggingFace
+
 on:
   workflow_dispatch:
     inputs:
-      url:
-        description: 'Download URL'
+      civitai_url:
+        description: 'Civitai Download URL'
         required: true
+        type: string
       filename:
-        description: 'Filename'
+        description: 'Filename (e.g. model.safetensors)'
         required: true
-        default: 'file.safetensors'
+        default: 'model.safetensors'
+      hf_repo:
+        description: 'Your HuggingFace Dataset Name (e.g. my-storage)'
+        required: true
+        default: 'my-storage'
 
 jobs:
-  upload:
+  transfer:
     runs-on: ubuntu-latest
     steps:
       - name: Install Dependencies
-        run: pip install huggingface_hub
-      
-      - name: Download
         run: |
+          sudo apt-get update
           sudo apt-get install -y aria2
-          aria2c -x 16 -s 16 -o "${{ inputs.filename }}" "${{ inputs.url }}"
+          pip install huggingface_hub
+
+      - name: Download from Civitai
+        env:
+          CIVITAI_TOKEN: ${{ secrets.CIVITAI_API_KEY }}
+        run: |
+          echo "Starting download from Civitai..."
+          aria2c -x 16 -s 16 \
+            --header="Authorization: Bearer $CIVITAI_TOKEN" \
+            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -o "${{ inputs.filename }}" \
+            "${{ inputs.civitai_url }}"
           
-      - name: Upload
+          echo ""
+          echo "=== Download Complete ==="
+          echo "File size: $(du -h ${{ inputs.filename }} | cut -f1)"
+
+      - name: Upload to HuggingFace
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          python -c "
+          echo "Uploading to HuggingFace..."
+          python3 -c "
           from huggingface_hub import HfApi
+          import os
+
           api = HfApi()
+          token = os.environ['HF_TOKEN']
+
           api.upload_file(
               path_or_fileobj='${{ inputs.filename }}',
               path_in_repo='${{ inputs.filename }}',
-              repo_id='Arashm1386/my-storage',
+              repo_id='Arashm1386/${{ inputs.hf_repo }}',
               repo_type='dataset',
-              token='${{ env.HF_TOKEN }}'
-          )"      
+              token=token
+          )
+          print('Upload complete!')
+          print('Your file is at:')
+          print(f'https://huggingface.co/datasets/Arashm1386/${{ inputs.hf_repo }}/resolve/main/${{ inputs.filename }}')
+          "
