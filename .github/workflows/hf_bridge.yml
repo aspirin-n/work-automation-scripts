@@ -23,18 +23,53 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y aria2
+          sudo apt-get install -y aria2 curl
           pip install huggingface_hub
+
+      - name: Get Real Download URL
+        id: get_url
+        env:
+          CIVITAI_TOKEN: ${{ secrets.CIVITAI_API_KEY }}
+        run: |
+          echo "Resolving real download URL..."
+          
+          # Follow the redirect manually to get the final B2 URL
+          REAL_URL=$(curl -sI \
+            -H "Authorization: Bearer $CIVITAI_TOKEN" \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -L \
+            "${{ inputs.civitai_url }}" | grep -i "^location:" | tail -1 | tr -d '\r' | sed 's/location: //i')
+          
+          # If no redirect found use original URL
+          if [ -z "$REAL_URL" ]; then
+            echo "No redirect found, using original URL"
+            REAL_URL="${{ inputs.civitai_url }}"
+          fi
+          
+          echo "Real URL: $REAL_URL"
+          echo "real_url=$REAL_URL" >> $GITHUB_OUTPUT
 
       - name: Download from Civitai
         env:
           CIVITAI_TOKEN: ${{ secrets.CIVITAI_API_KEY }}
         run: |
-          echo "Starting download from Civitai..."
+          echo "Starting download..."
+          
+          # Try aria2 with the real B2 URL first (no auth header needed for B2)
           aria2c -x 16 -s 16 \
-            --header="Authorization: Bearer $CIVITAI_TOKEN" \
+            --max-tries=5 \
+            --retry-wait=3 \
             --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
             -o "${{ inputs.filename }}" \
+            "${{ steps.get_url.outputs.real_url }}" || \
+          
+          # If that fails, fall back to wget which handles redirects better
+          wget \
+            --header="Authorization: Bearer $CIVITAI_TOKEN" \
+            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            --content-disposition \
+            --trust-server-names \
+            -O "${{ inputs.filename }}" \
             "${{ inputs.civitai_url }}"
           
           echo ""
@@ -61,6 +96,6 @@ jobs:
               token=token
           )
           print('Upload complete!')
-          print('Your file is at:')
+          print('File available at:')
           print(f'https://huggingface.co/datasets/Arashm1386/${{ inputs.hf_repo }}/resolve/main/${{ inputs.filename }}')
           "
