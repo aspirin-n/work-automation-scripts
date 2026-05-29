@@ -1,0 +1,50 @@
+name: Universal to Google Drive
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Direct Download URL (Any website)'
+        required: true
+        type: string
+      filename:
+        description: 'What to save the file as (e.g., video.mp4, game.zip)'
+        required: true
+        type: string
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2
+          # Install Rclone for Google Drive upload
+          sudo -v ; curl https://rclone.org/install.sh | sudo bash
+
+      - name: Setup Google Drive Auth
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "${{ secrets.RCLONE_CONFIG }}" > ~/.config/rclone/rclone.conf
+
+      - name: Download File
+        env:
+          URL: ${{ inputs.url }}
+          FILENAME: ${{ inputs.filename }}
+        run: |
+          echo "Downloading file..."
+          # Using aria2 for maximum speed (16 connections)
+          aria2c -x 16 -s 16 -o "$FILENAME" "$URL"
+          
+          echo "=== Download Complete ==="
+          ls -lh "$FILENAME"
+
+      - name: Upload to Google Drive
+        env:
+          FILENAME: ${{ inputs.filename }}
+        run: |
+          echo "Uploading to Google Drive..."
+          # This moves the file into a folder called "GitHub_Downloads" in your Drive
+          rclone copy "$FILENAME" "gdrive:GitHub_Downloads/" -v --stats=5s
+          echo "✅ Upload Complete! Check your Google Drive."
