@@ -24,9 +24,13 @@ jobs:
           sudo -v ; curl https://rclone.org/install.sh | sudo bash
 
       - name: Setup Google Drive Auth
+        env:
+          # We pass the secret as an environment variable to prevent shell scrambling
+          RCLONE_SECRET_DATA: ${{ secrets.RCLONE_CONFIG }}
         run: |
           mkdir -p ~/.config/rclone
-          echo "${{ secrets.RCLONE_CONFIG }}" > ~/.config/rclone/rclone.conf
+          # Using single quotes and '$' keeps the text completely clean and raw
+          echo "$RCLONE_SECRET_DATA" > ~/.config/rclone/rclone.conf
 
       - name: Download File
         env:
@@ -34,7 +38,6 @@ jobs:
           FILENAME: ${{ inputs.filename }}
         run: |
           echo "Downloading file..."
-          # Using aria2 for maximum speed (16 connections)
           aria2c -x 16 -s 16 -o "$FILENAME" "$URL"
           
           echo "=== Download Complete ==="
@@ -45,6 +48,5 @@ jobs:
           FILENAME: ${{ inputs.filename }}
         run: |
           echo "Uploading to Google Drive..."
-          # This moves the file into a folder called "GitHub_Downloads" in your Drive
           rclone copy "$FILENAME" "gdrive:GitHub_Downloads/" -v --stats=5s
           echo "✅ Upload Complete! Check your Google Drive."
