@@ -3,8 +3,12 @@ name: Scrape and Release Media
 on:
   workflow_dispatch:
     inputs:
-      target_url:
-        description: 'The main URL containing the sub-links to scrape'
+      base_url:
+        description: 'Base URL WITHOUT the number (e.g., https://domain.com/model)'
+        required: true
+        type: string
+      start_number:
+        description: 'The number to start counting down from (e.g., 100)'
         required: true
         type: string
       max_files:
@@ -13,11 +17,11 @@ on:
         default: '50'
         type: string
       css_selector:
-        description: 'Optional: CSS Selector for the main media container (e.g., .post-content). Leave blank to search whole page.'
+        description: 'Optional: CSS Selector for the main media container.'
         required: false
         type: string
       min_size_kb:
-        description: 'Minimum file size in KB to filter out small ads/icons.'
+        description: 'Minimum file size in KB.'
         required: true
         default: '100'
         type: string
@@ -42,7 +46,8 @@ jobs:
 
       - name: Run the Scraper
         env:
-          TARGET_URL: ${{ inputs.target_url }}
+          BASE_URL: ${{ inputs.base_url }}
+          START_NUMBER: ${{ inputs.start_number }}
           MAX_FILES: ${{ inputs.max_files }}
           CSS_SELECTOR: ${{ inputs.css_selector }}
           MIN_SIZE_KB: ${{ inputs.min_size_kb }}
@@ -68,8 +73,7 @@ jobs:
           tag_name: v${{ env.release_tag }}
           name: Scraped Media - ${{ env.release_tag }}
           body: |
-            Automated media scrape from: ${{ inputs.target_url }}
+            Automated media scrape starting from: ${{ inputs.base_url }}/${{ inputs.start_number }}
             File Limit: ${{ inputs.max_files }}
-            CSS Filter Used: ${{ inputs.css_selector || 'None' }}
             Min Size Filter: ${{ inputs.min_size_kb }} KB
           files: media_archive.zip
