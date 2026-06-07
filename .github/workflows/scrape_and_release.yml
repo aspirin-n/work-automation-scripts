@@ -11,19 +11,19 @@ on:
         description: 'The number to start counting down from (e.g., 100)'
         required: true
         type: string
+      keyword:
+        description: 'REQUIRED: The word that must be in the file name (e.g., the model name)'
+        required: true
+        type: string
       max_files:
         description: 'Max total files to download. Type 0 for unlimited.'
         required: true
         default: '50'
         type: string
-      css_selector:
-        description: 'Optional: CSS Selector for the main media container.'
-        required: false
-        type: string
-      min_size_kb:
-        description: 'Minimum file size in KB.'
+      max_dead_pages:
+        description: 'How many missing/skipped numbers in a row before stopping?'
         required: true
-        default: '100'
+        default: '30'
         type: string
 
 jobs:
@@ -48,9 +48,9 @@ jobs:
         env:
           BASE_URL: ${{ inputs.base_url }}
           START_NUMBER: ${{ inputs.start_number }}
+          KEYWORD: ${{ inputs.keyword }}
           MAX_FILES: ${{ inputs.max_files }}
-          CSS_SELECTOR: ${{ inputs.css_selector }}
-          MIN_SIZE_KB: ${{ inputs.min_size_kb }}
+          MAX_DEAD_PAGES: ${{ inputs.max_dead_pages }}
         run: python downloader.py
 
       - name: Zip the downloaded media
@@ -74,6 +74,6 @@ jobs:
           name: Scraped Media - ${{ env.release_tag }}
           body: |
             Automated media scrape starting from: ${{ inputs.base_url }}/${{ inputs.start_number }}
+            Keyword required in filename: ${{ inputs.keyword }}
             File Limit: ${{ inputs.max_files }}
-            Min Size Filter: ${{ inputs.min_size_kb }} KB
           files: media_archive.zip
