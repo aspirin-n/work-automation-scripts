@@ -1,0 +1,232 @@
+name: Gallery Media Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Main gallery URL (e.g., https://leakgallery.com/ldrzelall)'
+        required: true
+        type: string
+      page_range:
+        description: 'Page range like "1-10" or specific URLs separated by commas'
+        required: true
+        default: '1'
+        type: string
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg zip jq curl
+          pip3 install -U yt-dlp requests beautifulsoup4
+
+      - name: Create Browser Headers
+        run: |
+          cat > headers.txt << 'EOF'
+          User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
+          Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8
+          Accept-Language: en-US,en;q=0.5
+          Accept-Encoding: gzip, deflate, br
+          Connection: keep-alive
+          Upgrade-Insecure-Requests: 1
+          EOF
+
+      - name: Generate Sub-Links
+        run: |
+          mkdir -p media_files
+          
+          # Method 1: If it's a numbered pagination (page1, page2, etc.)
+          if [[ "${{ inputs.page_range }}" == *"-"* ]]; then
+            START=$(echo "${{ inputs.page_range }}" | cut -d'-' -f1)
+            END=$(echo "${{ inputs.page_range }}" | cut -d'-' -f2)
+            
+            for PAGE in $(seq $START $END); do
+              echo "${{ inputs.base_url }}?page=$PAGE" >> urls.txt
+            done
+          else
+            # Method 2: Comma-separated specific URLs
+            echo "${{ inputs.page_range }}" | tr ',' '\n' > urls.txt
+          fi
+          
+          echo "Generated URLs:"
+          cat urls.txt
+
+      - name: Scrape Media URLs from Pages
+        run: |
+          python3 << 'PYTHON_SCRIPT'
+          import requests
+          from bs4 import BeautifulSoup
+          import re
+          import time
+          
+          media_urls = []
+          
+          with open('urls.txt', 'r') as f:
+              pages = [line.strip() for line in f if line.strip()]
+          
+          for page_url in pages:
+              print(f"Scraping: {page_url}")
+              
+              # Add delay to avoid rate limiting
+              time.sleep(2)
+              
+              headers = {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                  'Accept-Language': 'en-US,en;q=0.5',
+                  'Referer': page_url
+              }
+              
+              try:
+                  # For sites that block Python, you may need to use wget or curl with cookies
+                  response = requests.get(page_url, headers=headers, timeout=30)
+                  
+                  if response.status_code == 403:
+                      print(f"⚠️ 403 Blocked for {page_url}. Trying with curl...")
+                      import subprocess
+                      result = subprocess.run(['curl', '-L', '-b', 'cookies.txt', '-A', 'Mozilla/5.0', page_url], 
+                                            capture_output=True, text=True)
+                      html = result.stdout
+                  else:
+                      html = response.text
+                  
+                  soup = BeautifulSoup(html, 'html.parser')
+                  
+                  # Common patterns for media links (adjust based on actual site structure)
+                  # Look for video elements
+                  for video in soup.find_all(['video', 'source']):
+                      src = video.get('src') or video.get('data-src')
+                      if src and ('.mp4' in src or '.m3u8' in src):
+                          if not src.startswith('http'):
+                              from urllib.parse import urljoin
+                              src = urljoin(page_url, src)
+                          media_urls.append(src)
+                          print(f"  Found video: {src}")
+                  
+                  # Look for image elements  
+                  for img in soup.find_all('img'):
+                      src = img.get('src') or img.get('data-src') or img.get('data-original')
+                      if src and any(ext in src.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                          if not src.startswith('http'):
+                              from urllib.parse import urljoin
+                              src = urljoin(page_url, src)
+                          media_urls.append(src)
+                          print(f"  Found image: {src}")
+                  
+                  # Look for direct links (a tags pointing to media)
+                  for link in soup.find_all('a', href=True):
+                      href = link['href']
+                      if any(ext in href.lower() for ext in ['.mp4', '.jpg', '.jpeg', '.png', '.webp', '.mov']):
+                          if not href.startswith('http'):
+                              from urllib.parse import urljoin
+                              href = urljoin(page_url, href)
+                          media_urls.append(href)
+                          print(f"  Found direct link: {href}")
+                          
+              except Exception as e:
+                  print(f"Error scraping {page_url}: {e}")
+          
+          # Save unique URLs
+          media_urls = list(dict.fromkeys(media_urls))  # remove duplicates
+          with open('media_urls.txt', 'w') as f:
+              for url in media_urls:
+                  f.write(url + '\n')
+          
+          print(f"\n✅ Total media URLs found: {len(media_urls)}")
+          PYTHON_SCRIPT
+
+      - name: Download Media Files
+        run: |
+          NUM=0
+          TOTAL=$(cat media_urls.txt | wc -l)
+          
+          while IFS= read -r URL; do
+            [ -z "$URL" ] && continue
+            NUM=$((NUM + 1))
+            
+            echo ""
+            echo "==============================="
+            echo "Downloading [$NUM/$TOTAL]: $URL"
+            echo "==============================="
+            
+            # Extract file extension
+            EXT="${URL##*.}"
+            EXT=$(echo "$EXT" | cut -d'?' -f1 | tr '[:upper:]' '[:lower:]')
+            
+            # Use yt-dlp for complex videos, curl for images
+            if [[ "$EXT" == "mp4" ]] || [[ "$EXT" == "m3u8" ]] || [[ "$URL" == *"youtube.com"* ]] || [[ "$URL" == *"vimeo.com"* ]]; then
+              yt-dlp \
+                --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+                --referer "${{ inputs.base_url }}" \
+                -f "best[ext=mp4]/best" \
+                -o "media_files/media_${NUM}.%(ext)s" \
+                "$URL" || echo "⚠️ Failed: $URL"
+            else
+              # Download images and direct files with curl
+              curl -L -b cookies.txt \
+                -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+                -H "Referer: ${{ inputs.base_url }}" \
+                --max-time 300 \
+                --retry 3 \
+                -o "media_files/media_${NUM}.${EXT}" \
+                "$URL" || echo "⚠️ Failed: $URL"
+            fi
+            
+            # Small delay to be respectful
+            sleep 1
+            
+          done < media_urls.txt
+          
+          echo ""
+          echo "=== Download Summary ==="
+          ls -lh media_files/ || echo "No files downloaded"
+
+      - name: Pack into ZIPs under 95MB
+        run: |
+          MAX_SIZE=$((95 * 1024 * 1024))  # 95MB for GitHub
+          BATCH_NUM=1
+          CURRENT_SIZE=0
+          
+          if [ -z "$(ls -A media_files 2>/dev/null)" ]; then
+            echo "No media files were downloaded!"
+            exit 1
+          fi
+          
+          for FILE in media_files/*; do
+            [ -f "$FILE" ] || continue
+            
+            F_SIZE=$(stat -c%s "$FILE")
+            echo "Adding: $(basename $FILE) ($(du -h $FILE | cut -f1))"
+            
+            if [ $((CURRENT_SIZE + F_SIZE)) -gt "$MAX_SIZE" ] && [ "$CURRENT_SIZE" -gt 0 ]; then
+              echo "Batch $BATCH_NUM full ($(numfmt --to=iec $CURRENT_SIZE)). Starting batch $((BATCH_NUM + 1))."
+              BATCH_NUM=$((BATCH_NUM + 1))
+              CURRENT_SIZE=0
+            fi
+            
+            zip -j "gallery_batch_${BATCH_NUM}.zip" "$FILE"
+            CURRENT_SIZE=$((CURRENT_SIZE + F_SIZE))
+          done
+          
+          rm -rf media_files
+          
+          echo ""
+          echo "=== ZIP Summary ==="
+          ls -lh gallery_batch_*.zip
+
+      - name: Commit and Push to GitHub
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git rm -f gallery_batch_*.zip 2>/dev/null || true
+          git add gallery_batch_*.zip
+          git commit -m "Add gallery media from ${{ inputs.base_url }}" || echo "No changes to commit"
+          git push origin HEAD:main --force
