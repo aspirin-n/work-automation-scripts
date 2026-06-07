@@ -7,15 +7,19 @@ on:
         description: 'The main URL containing the sub-links to scrape'
         required: true
         type: string
-      max_pages:
-        description: 'Max sub-pages to check (e.g., 5). Type 0 for unlimited.'
-        required: true
-        default: '5'
-        type: string
       max_files:
-        description: 'Max total files to download (e.g., 50). Type 0 for unlimited.'
+        description: 'Max total files to download. Type 0 for unlimited.'
         required: true
         default: '50'
+        type: string
+      css_selector:
+        description: 'Optional: CSS Selector for the main media container (e.g., .post-content). Leave blank to search whole page.'
+        required: false
+        type: string
+      min_size_kb:
+        description: 'Minimum file size in KB to filter out small ads/icons.'
+        required: true
+        default: '100'
         type: string
 
 jobs:
@@ -39,8 +43,9 @@ jobs:
       - name: Run the Scraper
         env:
           TARGET_URL: ${{ inputs.target_url }}
-          MAX_PAGES: ${{ inputs.max_pages }}
           MAX_FILES: ${{ inputs.max_files }}
+          CSS_SELECTOR: ${{ inputs.css_selector }}
+          MIN_SIZE_KB: ${{ inputs.min_size_kb }}
         run: python downloader.py
 
       - name: Zip the downloaded media
@@ -64,6 +69,7 @@ jobs:
           name: Scraped Media - ${{ env.release_tag }}
           body: |
             Automated media scrape from: ${{ inputs.target_url }}
-            Pages Checked: ${{ inputs.max_pages }}
             File Limit: ${{ inputs.max_files }}
+            CSS Filter Used: ${{ inputs.css_selector || 'None' }}
+            Min Size Filter: ${{ inputs.min_size_kb }} KB
           files: media_archive.zip
