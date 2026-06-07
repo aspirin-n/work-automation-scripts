@@ -1,29 +1,25 @@
-name: Scrape and Release Media
+name: API Scrape and Release Media
 
 on:
   workflow_dispatch:
     inputs:
-      base_url:
-        description: 'Base URL WITHOUT the number (e.g., https://domain.com/model)'
+      api_url:
+        description: 'The API Request URL. Replace the page number with {page} (e.g., https://domain.com/api/get?page={page})'
         required: true
         type: string
-      start_number:
-        description: 'The number to start counting down from (e.g., 100)'
+      media_base_url:
+        description: 'The root URL for media (e.g., https://domain.com/)'
         required: true
         type: string
-      keyword:
-        description: 'REQUIRED: The word that must be in the file name (e.g., the model name)'
+      start_page:
+        description: 'Page number to start on'
         required: true
+        default: '1'
         type: string
       max_files:
         description: 'Max total files to download. Type 0 for unlimited.'
         required: true
         default: '50'
-        type: string
-      max_dead_pages:
-        description: 'How many missing/skipped numbers in a row before stopping?'
-        required: true
-        default: '30'
         type: string
 
 jobs:
@@ -44,13 +40,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run the Scraper
+      - name: Run the API Scraper
         env:
-          BASE_URL: ${{ inputs.base_url }}
-          START_NUMBER: ${{ inputs.start_number }}
-          KEYWORD: ${{ inputs.keyword }}
+          API_URL: ${{ inputs.api_url }}
+          MEDIA_BASE_URL: ${{ inputs.media_base_url }}
+          START_PAGE: ${{ inputs.start_page }}
           MAX_FILES: ${{ inputs.max_files }}
-          MAX_DEAD_PAGES: ${{ inputs.max_dead_pages }}
         run: python downloader.py
 
       - name: Zip the downloaded media
@@ -71,9 +66,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ env.release_tag }}
-          name: Scraped Media - ${{ env.release_tag }}
+          name: Scraped API Media - ${{ env.release_tag }}
           body: |
-            Automated media scrape starting from: ${{ inputs.base_url }}/${{ inputs.start_number }}
-            Keyword required in filename: ${{ inputs.keyword }}
+            Automated API media scrape.
             File Limit: ${{ inputs.max_files }}
           files: media_archive.zip
