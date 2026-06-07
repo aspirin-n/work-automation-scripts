@@ -11,9 +11,12 @@ if not BASE_URL:
     print("[-] Error: TARGET_URL environment variable is missing.")
     sys.exit(1)
 
+MAX_PAGES = int(os.getenv("MAX_PAGES", 0))
+MAX_FILES = int(os.getenv("MAX_FILES", 0))
+
 TARGET_DOMAIN = urlparse(BASE_URL).netloc
 DOWNLOAD_DIR = "downloaded_media"
-DELAY_SECONDS = 0.5  # Reduced delay since GitHub servers are fast
+DELAY_SECONDS = 0.5
 # ----------------------------------------
 
 
@@ -36,16 +39,17 @@ def get_soup(url):
 
 
 def download_file(url, folder):
+    """Returns True if the file was downloaded or already exists, False if it failed."""
     try:
         parsed_url = urlparse(url)
         filename = os.path.basename(parsed_url.path)
 
         if not filename:
-            return
+            return False
 
         file_path = os.path.join(folder, filename)
         if os.path.exists(file_path):
-            return
+            return True
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -58,9 +62,11 @@ def download_file(url, folder):
                 if chunk:
                     f.write(chunk)
         print(f"[+] Downloaded: {filename}")
+        return True
 
     except requests.RequestException as e:
         print(f"[-] Failed to download {url}: {e}")
+        return False
 
 
 def extract_sub_links(main_soup, base_url):
@@ -84,6 +90,9 @@ def extract_media_from_page(page_soup, page_url):
 
 def main():
     print(f"[*] Starting scraper for: {BASE_URL}")
+    if MAX_PAGES > 0: print(f"[*] Limit set to {MAX_PAGES} pages.")
+    if MAX_FILES > 0: print(f"[*] Limit set to {MAX_FILES} total files.")
+    
     create_download_dir(DOWNLOAD_DIR)
 
     main_soup = get_soup(BASE_URL)
@@ -94,19 +103,38 @@ def main():
     sub_links = extract_sub_links(main_soup, BASE_URL)
     print(f"[*] Found {len(sub_links)} sub-links to investigate.")
 
+    total_files_downloaded = 0
+
     for index, sub_link in enumerate(sub_links, 1):
-        print(f"[*] Processing sub-link ({index}/{len(sub_links)}): {sub_link}")
+        # Check page limit
+        if MAX_PAGES > 0 and index > MAX_PAGES:
+            print(f"\n[*] Reached maximum page limit ({MAX_PAGES}). Stopping page scans.")
+            break
+
+        print(f"\n[*] Processing sub-link ({index}/{len(sub_links)}): {sub_link}")
         sub_soup = get_soup(sub_link)
         if not sub_soup:
             continue
 
         media_urls = extract_media_from_page(sub_soup, sub_link)
+        print(f"[i] Found {len(media_urls)} media items on this page.")
+
         for media_url in media_urls:
-            download_file(media_url, DOWNLOAD_DIR)
+            # Check file limit before each download
+            if MAX_FILES > 0 and total_files_downloaded >= MAX_FILES:
+                print(f"\n[*] Reached maximum file limit ({MAX_FILES}). Stopping all downloads.")
+                break 
+
+            if download_file(media_url, DOWNLOAD_DIR):
+                total_files_downloaded += 1
+
+        # Double check file limit to break out of the main page loop as well
+        if MAX_FILES > 0 and total_files_downloaded >= MAX_FILES:
+            break
         
         time.sleep(DELAY_SECONDS)
 
-    print("\n[+] Scraping task completed!")
+    print(f"\n[+] Scraping task completed! Total files secured: {total_files_downloaded}")
 
 
 if __name__ == "__main__":
