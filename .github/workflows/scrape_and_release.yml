@@ -7,12 +7,22 @@ on:
         description: 'The main URL containing the sub-links to scrape'
         required: true
         type: string
+      max_pages:
+        description: 'Max sub-pages to check (e.g., 5). Type 0 for unlimited.'
+        required: true
+        default: '5'
+        type: string
+      max_files:
+        description: 'Max total files to download (e.g., 50). Type 0 for unlimited.'
+        required: true
+        default: '50'
+        type: string
 
 jobs:
   scrape-and-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Required to create a release
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -29,11 +39,12 @@ jobs:
       - name: Run the Scraper
         env:
           TARGET_URL: ${{ inputs.target_url }}
+          MAX_PAGES: ${{ inputs.max_pages }}
+          MAX_FILES: ${{ inputs.max_files }}
         run: python downloader.py
 
       - name: Zip the downloaded media
         run: |
-          # Create zip only if the directory exists and has files
           if [ -d "downloaded_media" ] && [ "$(ls -A downloaded_media)" ]; then
             zip -r media_archive.zip downloaded_media/
           else
@@ -51,5 +62,8 @@ jobs:
         with:
           tag_name: v${{ env.release_tag }}
           name: Scraped Media - ${{ env.release_tag }}
-          body: "Automated media scrape from: ${{ inputs.target_url }}"
+          body: |
+            Automated media scrape from: ${{ inputs.target_url }}
+            Pages Checked: ${{ inputs.max_pages }}
+            File Limit: ${{ inputs.max_files }}
           files: media_archive.zip
