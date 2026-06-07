@@ -1,0 +1,55 @@
+name: Scrape and Release Media
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'The main URL containing the sub-links to scrape'
+        required: true
+        type: string
+
+jobs:
+  scrape-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to create a release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run the Scraper
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+        run: python downloader.py
+
+      - name: Zip the downloaded media
+        run: |
+          # Create zip only if the directory exists and has files
+          if [ -d "downloaded_media" ] && [ "$(ls -A downloaded_media)" ]; then
+            zip -r media_archive.zip downloaded_media/
+          else
+            echo "No media was downloaded. Creating an empty zip to prevent failure."
+            touch empty.txt
+            zip media_archive.zip empty.txt
+          fi
+
+      - name: Generate a timestamp for the Release Tag
+        id: tag
+        run: echo "release_tag=$(date +'%Y.%m.%d-%H%M%S')" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.release_tag }}
+          name: Scraped Media - ${{ env.release_tag }}
+          body: "Automated media scrape from: ${{ inputs.target_url }}"
+          files: media_archive.zip
