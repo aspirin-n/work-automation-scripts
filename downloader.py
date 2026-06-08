@@ -2,7 +2,8 @@ import os
 import time
 import sys
 from urllib.parse import urljoin
-import requests
+# We import requests from curl_cffi instead of the standard library
+from curl_cffi import requests
 
 # --- CONFIGURATION via GITHUB ACTIONS ---
 API_URL = os.getenv("API_URL")
@@ -17,7 +18,7 @@ START_PAGE = int(os.getenv("START_PAGE", 1))
 MAX_FILES = int(os.getenv("MAX_FILES", 0))
 
 DOWNLOAD_DIR = "downloaded_media"
-DELAY_SECONDS = 0.5
+DELAY_SECONDS = 1.0  # Slightly longer delay to match browser pacing
 # ----------------------------------------
 
 def create_download_dir(directory):
@@ -26,7 +27,7 @@ def create_download_dir(directory):
 
 def download_file(url, folder):
     try:
-        filename = url.split('/')[-1]
+        filename = url.split('/')[-1].split('?')[0]
         if not filename: return False
 
         file_path = os.path.join(folder, filename)
@@ -34,49 +35,57 @@ def download_file(url, folder):
             print(f"[~] Already exists: {filename}")
             return True
 
-        # Complete Request Headers containing the authentication Secret
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8,video/*",
             "Referer": MEDIA_BASE_URL, 
-            "Origin": MEDIA_BASE_URL
+            "Origin": MEDIA_BASE_URL,
+            "Accept-Language": "en-US,en;q=0.9",
         }
         if COOKIE_STRING:
             headers["Cookie"] = COOKIE_STRING
         
-        response = requests.get(url, headers=headers, stream=True, timeout=15)
+        # impersonate="chrome" mimics a real Chrome TLS/JA3 fingerprint perfectly
+        response = requests.get(
+            url, 
+            headers=headers, 
+            impersonate="chrome", 
+            timeout=30
+        )
         response.raise_for_status()
 
-        # Block hotlink HTML error pages pretending to be files
         content_type = response.headers.get('Content-Type', '').lower()
         if 'text/html' in content_type:
-            print(f"[-] Blocked by Server WAF. Received a webpage instead of media for: {filename}")
+            print(f"[-] Blocked by Firewall: Received HTML instead of media for {filename}")
             return False
 
         with open(file_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk: f.write(chunk)
+            f.write(response.content)
                 
         actual_size_kb = os.path.getsize(file_path) / 1024
         print(f"[+] Downloaded: {filename} ({actual_size_kb:.1f} KB)")
         return True
 
-    except requests.RequestException as e:
+    except Exception as e:
         print(f"[-] Failed to download {url}: {e}")
         return False
 
 def get_api_page(page_num):
     target_url = API_URL.replace("{page}", str(page_num))
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": MEDIA_BASE_URL
+        "Accept": "application/json, text/plain, */*",
+        "Referer": MEDIA_BASE_URL,
+        "Accept-Language": "en-US,en;q=0.9",
     }
     if COOKIE_STRING:
         headers["Cookie"] = COOKIE_STRING
     
     try:
-        response = requests.get(target_url, headers=headers, timeout=15)
+        response = requests.get(
+            target_url, 
+            headers=headers, 
+            impersonate="chrome", 
+            timeout=30
+        )
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -84,9 +93,9 @@ def get_api_page(page_num):
         return None
 
 def main():
-    print("[*] Starting API scraper with Automated Secret Token validation.")
+    print("[*] Starting Advanced Chrome-Impersonation Scraper.")
     if not COOKIE_STRING:
-        print("[!] Warning: COOKIE_STRING environment variable is empty. Running without authentication.")
+        print("[!] Warning: COOKIE_STRING secret is missing.")
         
     create_download_dir(DOWNLOAD_DIR)
     
@@ -102,16 +111,15 @@ def main():
         data = get_api_page(current_page)
         
         if not data:
-            print("[-] No data returned or API error. Stopping.")
+            print("[-] API request failed. Stopping execution.")
             break
             
         medias = data.get("medias", [])
-        
         if not medias:
-            print("[*] No more media found in this page. Gallery complete!")
+            print("[*] No more media found in JSON. Gallery complete!")
             break
             
-        print(f"[*] Found {len(medias)} files on page {current_page}.")
+        print(f"[*] Found {len(medias)} items on page {current_page}.")
 
         for item in medias:
             if MAX_FILES > 0 and total_files >= MAX_FILES:
@@ -129,7 +137,7 @@ def main():
         current_page += 1
         time.sleep(DELAY_SECONDS)
 
-    print(f"\n[+] Task complete! Total actual media files secured: {total_files}")
+    print(f"\n[+] Task complete! Total files secured: {total_files}")
 
 if __name__ == "__main__":
     main()
