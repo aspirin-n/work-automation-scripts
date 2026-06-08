@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       api_url:
-        description: 'The API Request URL. Replace the page number with {page} (e.g., https://domain.com/api/get?page={page})'
+        description: 'The API Request URL. Replace the page number with {page}'
         required: true
         type: string
       media_base_url:
@@ -46,6 +46,7 @@ jobs:
           MEDIA_BASE_URL: ${{ inputs.media_base_url }}
           START_PAGE: ${{ inputs.start_page }}
           MAX_FILES: ${{ inputs.max_files }}
+          COOKIE_STRING: ${{ secrets.COOKIE_STRING }}  # <-- Securely fetches your hidden secret
         run: python downloader.py
 
       - name: Zip the downloaded media
@@ -68,6 +69,6 @@ jobs:
           tag_name: v${{ env.release_tag }}
           name: Scraped API Media - ${{ env.release_tag }}
           body: |
-            Automated API media scrape.
+            Automated API media scrape utilizing secure session tokens.
             File Limit: ${{ inputs.max_files }}
           files: media_archive.zip
