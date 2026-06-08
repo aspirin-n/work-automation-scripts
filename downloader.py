@@ -7,6 +7,7 @@ import requests
 # --- CONFIGURATION via GITHUB ACTIONS ---
 API_URL = os.getenv("API_URL")
 MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL")
+COOKIE_STRING = os.getenv("COOKIE_STRING", "").strip()
 
 if not API_URL or not MEDIA_BASE_URL:
     print("[-] Error: API_URL or MEDIA_BASE_URL environment variable is missing.")
@@ -33,29 +34,29 @@ def download_file(url, folder):
             print(f"[~] Already exists: {filename}")
             return True
 
-        # CRITICAL FIX: We must pass a Referer so the server thinks we are on the actual website
+        # Complete Request Headers containing the authentication Secret
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8,video/*",
             "Referer": MEDIA_BASE_URL, 
             "Origin": MEDIA_BASE_URL
         }
+        if COOKIE_STRING:
+            headers["Cookie"] = COOKIE_STRING
         
-        # Use stream=True so we can check headers before downloading the whole thing
         response = requests.get(url, headers=headers, stream=True, timeout=15)
         response.raise_for_status()
 
-        # CRITICAL FIX: Check what the server is actually sending us
+        # Block hotlink HTML error pages pretending to be files
         content_type = response.headers.get('Content-Type', '').lower()
         if 'text/html' in content_type:
-            print(f"[-] Blocked by Server (Hotlink protection). Received a webpage instead of media for: {filename}")
+            print(f"[-] Blocked by Server WAF. Received a webpage instead of media for: {filename}")
             return False
 
         with open(file_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk: f.write(chunk)
                 
-        # Get the real downloaded size to verify
         actual_size_kb = os.path.getsize(file_path) / 1024
         print(f"[+] Downloaded: {filename} ({actual_size_kb:.1f} KB)")
         return True
@@ -71,6 +72,8 @@ def get_api_page(page_num):
         "Accept": "application/json",
         "Referer": MEDIA_BASE_URL
     }
+    if COOKIE_STRING:
+        headers["Cookie"] = COOKIE_STRING
     
     try:
         response = requests.get(target_url, headers=headers, timeout=15)
@@ -81,7 +84,10 @@ def get_api_page(page_num):
         return None
 
 def main():
-    print(f"[*] Starting API scraper with Anti-Bot bypass.")
+    print("[*] Starting API scraper with Automated Secret Token validation.")
+    if not COOKIE_STRING:
+        print("[!] Warning: COOKIE_STRING environment variable is empty. Running without authentication.")
+        
     create_download_dir(DOWNLOAD_DIR)
     
     current_page = START_PAGE
