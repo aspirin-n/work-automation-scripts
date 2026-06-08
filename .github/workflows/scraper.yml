@@ -8,7 +8,7 @@ on:
         required: true
         default: 'https://leakgallery.com/ldrzelall'
       item_limit:
-        description: 'How many items to download? (e.g., 1-20 for the first 20, or leave empty for ALL)'
+        description: 'How many items to download? (e.g., 1-30, or leave empty for ALL)'
         required: false
         default: '1-30'
 
@@ -32,18 +32,24 @@ jobs:
 
       - name: Execute Cloud Download
         run: |
-          # If a limit is specified, add the range flag to gallery-dl
           RANGE_FLAG=""
           if [ ! -z "${{ github.event.inputs.item_limit }}" ]; then
             RANGE_FLAG="--range ${{ github.event.inputs.item_limit }}"
           fi
           
-          gallery-dl $RANGE_FLAG "${{ github.event.inputs.target_url }}"
+          # Force gallery-dl to put everything inside a clean folder named 'downloads'
+          gallery-dl $RANGE_FLAG --destination downloads "${{ github.event.inputs.target_url }}"
 
-      - name: Package and Upload Gallery as ZIP
+      - name: Compress Files into ZIP
+        if: always()
+        run: |
+          # This creates a solid zip file of whatever was caught
+          zip -r gallery.zip downloads/ || echo "No files found to zip"
+
+      - name: Upload Finished ZIP to GitHub
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: leakgallery-archive
-          path: gallery-dl/
+          path: gallery.zip
           retention-days: 3
