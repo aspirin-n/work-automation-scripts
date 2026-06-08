@@ -46,7 +46,7 @@ jobs:
           MEDIA_BASE_URL: ${{ inputs.media_base_url }}
           START_PAGE: ${{ inputs.start_page }}
           MAX_FILES: ${{ inputs.max_files }}
-          COOKIE_STRING: ${{ secrets.COOKIE_STRING }}  # <-- Securely fetches your hidden secret
+          RAW_HEADERS: ${{ secrets.RAW_HEADERS }}  # <-- Securely fetches your hidden secret
         run: python downloader.py
 
       - name: Zip the downloaded media
