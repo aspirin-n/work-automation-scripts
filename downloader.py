@@ -33,19 +33,31 @@ def download_file(url, folder):
             print(f"[~] Already exists: {filename}")
             return True
 
+        # CRITICAL FIX: We must pass a Referer so the server thinks we are on the actual website
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "*/*"
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8,video/*",
+            "Referer": MEDIA_BASE_URL, 
+            "Origin": MEDIA_BASE_URL
         }
         
+        # Use stream=True so we can check headers before downloading the whole thing
         response = requests.get(url, headers=headers, stream=True, timeout=15)
         response.raise_for_status()
+
+        # CRITICAL FIX: Check what the server is actually sending us
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' in content_type:
+            print(f"[-] Blocked by Server (Hotlink protection). Received a webpage instead of media for: {filename}")
+            return False
 
         with open(file_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk: f.write(chunk)
                 
-        print(f"[+] Downloaded: {filename}")
+        # Get the real downloaded size to verify
+        actual_size_kb = os.path.getsize(file_path) / 1024
+        print(f"[+] Downloaded: {filename} ({actual_size_kb:.1f} KB)")
         return True
 
     except requests.RequestException as e:
@@ -53,11 +65,11 @@ def download_file(url, folder):
         return False
 
 def get_api_page(page_num):
-    # Replaces the {page} placeholder with the actual number
     target_url = API_URL.replace("{page}", str(page_num))
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "application/json"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Referer": MEDIA_BASE_URL
     }
     
     try:
@@ -69,7 +81,7 @@ def get_api_page(page_num):
         return None
 
 def main():
-    print(f"[*] Starting API scraper.")
+    print(f"[*] Starting API scraper with Anti-Bot bypass.")
     create_download_dir(DOWNLOAD_DIR)
     
     current_page = START_PAGE
@@ -87,7 +99,6 @@ def main():
             print("[-] No data returned or API error. Stopping.")
             break
             
-        # The JSON structure you provided has a list called "medias"
         medias = data.get("medias", [])
         
         if not medias:
@@ -100,7 +111,6 @@ def main():
             if MAX_FILES > 0 and total_files >= MAX_FILES:
                 break 
 
-            # Extract the relative file path from the JSON and build the full link
             file_path = item.get("file_path")
             if not file_path:
                 continue
@@ -113,7 +123,7 @@ def main():
         current_page += 1
         time.sleep(DELAY_SECONDS)
 
-    print(f"\n[+] Task complete! Total files secured: {total_files}")
+    print(f"\n[+] Task complete! Total actual media files secured: {total_files}")
 
 if __name__ == "__main__":
     main()
