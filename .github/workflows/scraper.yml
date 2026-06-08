@@ -1,7 +1,16 @@
 name: Cloud Media Scraper
 
 on:
-  workflow_dispatch: # This adds a manual "Run" button to your GitHub dashboard
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Paste the LeakGallery Profile URL'
+        required: true
+        default: 'https://leakgallery.com/ldrzelall'
+      item_limit:
+        description: 'How many items to download? (e.g., 1-20 for the first 20, or leave empty for ALL)'
+        required: false
+        default: '1-30'
 
 jobs:
   scrape:
@@ -23,10 +32,16 @@ jobs:
 
       - name: Execute Cloud Download
         run: |
-          gallery-dl "https://leakgallery.com/ldrzelall"
+          # If a limit is specified, add the range flag to gallery-dl
+          RANGE_FLAG=""
+          if [ ! -z "${{ github.event.inputs.item_limit }}" ]; then
+            RANGE_FLAG="--range ${{ github.event.inputs.item_limit }}"
+          fi
+          
+          gallery-dl $RANGE_FLAG "${{ github.event.inputs.target_url }}"
 
       - name: Package and Upload Gallery as ZIP
-        if: always() # Ensures it tries to save whatever it managed to grab
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: leakgallery-archive
