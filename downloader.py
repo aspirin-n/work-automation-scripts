@@ -2,12 +2,12 @@ import os
 import time
 import sys
 from urllib.parse import urljoin
-# We import requests from curl_cffi instead of the standard library
 from curl_cffi import requests
 
 # --- CONFIGURATION via GITHUB ACTIONS ---
-API_URL = os.getenv("API_URL")
-MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL")
+# .strip().strip('"').strip("'") completely sanitizes stray spaces or quotes
+API_URL = os.getenv("API_URL", "").strip().strip('"').strip("'")
+MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "").strip().strip('"').strip("'")
 COOKIE_STRING = os.getenv("COOKIE_STRING", "").strip()
 
 if not API_URL or not MEDIA_BASE_URL:
@@ -18,7 +18,7 @@ START_PAGE = int(os.getenv("START_PAGE", 1))
 MAX_FILES = int(os.getenv("MAX_FILES", 0))
 
 DOWNLOAD_DIR = "downloaded_media"
-DELAY_SECONDS = 1.0  # Slightly longer delay to match browser pacing
+DELAY_SECONDS = 1.0  
 # ----------------------------------------
 
 def create_download_dir(directory):
@@ -27,6 +27,8 @@ def create_download_dir(directory):
 
 def download_file(url, folder):
     try:
+        # Extra sanitization on the individual media URL
+        url = url.strip()
         filename = url.split('/')[-1].split('?')[0]
         if not filename: return False
 
@@ -44,7 +46,6 @@ def download_file(url, folder):
         if COOKIE_STRING:
             headers["Cookie"] = COOKIE_STRING
         
-        # impersonate="chrome" mimics a real Chrome TLS/JA3 fingerprint perfectly
         response = requests.get(
             url, 
             headers=headers, 
@@ -70,7 +71,7 @@ def download_file(url, folder):
         return False
 
 def get_api_page(page_num):
-    target_url = API_URL.replace("{page}", str(page_num))
+    target_url = API_URL.replace("{page}", str(page_num)).strip()
     headers = {
         "Accept": "application/json, text/plain, */*",
         "Referer": MEDIA_BASE_URL,
@@ -80,6 +81,9 @@ def get_api_page(page_num):
         headers["Cookie"] = COOKIE_STRING
     
     try:
+        # Debug print so you can see exactly what URL curl is trying to hit
+        print(f"[*] Libcurl targeting: {target_url}")
+        
         response = requests.get(
             target_url, 
             headers=headers, 
@@ -94,9 +98,6 @@ def get_api_page(page_num):
 
 def main():
     print("[*] Starting Advanced Chrome-Impersonation Scraper.")
-    if not COOKIE_STRING:
-        print("[!] Warning: COOKIE_STRING secret is missing.")
-        
     create_download_dir(DOWNLOAD_DIR)
     
     current_page = START_PAGE
