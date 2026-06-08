@@ -12,6 +12,10 @@ on:
         required: false
         default: '1-30'
 
+# This gives the script permission to create a Release in your repo
+permissions:
+  contents: write
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -37,19 +41,18 @@ jobs:
             RANGE_FLAG="--range ${{ github.event.inputs.item_limit }}"
           fi
           
-          # Force gallery-dl to put everything inside a clean folder named 'downloads'
           gallery-dl $RANGE_FLAG --destination downloads "${{ github.event.inputs.target_url }}"
 
       - name: Compress Files into ZIP
-        if: always()
         run: |
-          # This creates a solid zip file of whatever was caught
           zip -r gallery.zip downloads/ || echo "No files found to zip"
 
-      - name: Upload Finished ZIP to GitHub
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Publish to Releases
+        uses: softprops/action-gh-release@v2
         with:
-          name: leakgallery-archive
-          path: gallery.zip
-          retention-days: 3
+          tag_name: run-${{ github.run_number }}
+          name: "Gallery Download #${{ github.run_number }}"
+          body: "Automated media backup for ${{ github.event.inputs.target_url }}"
+          files: gallery.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
