@@ -64,11 +64,27 @@ def download_file(url, folder, session_headers):
             print(f"[~] Already exists: {filename}", flush=True)
             return True
 
+        # CLEAN UP HEADERS FOR STATIC MEDIA
+        # We strip out API-specific flags and simulate a clean asset request
+        file_headers = {
+            "User-Agent": session_headers.get("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
+            "Cookie": session_headers.get("Cookie", ""),
+            "Referer": MEDIA_BASE_URL,
+            "Accept": "*/*",  # Crucial: tell the server we want raw media data, not JSON
+            "Accept-Language": session_headers.get("Accept-Language", "en-US,en;q=0.9"),
+            "Connection": "keep-alive"
+        }
+        
+        # Forward structural security tokens if present, ignoring the API layout flags
+        for key, val in session_headers.items():
+            if key.lower() in ["authorization", "x-csrf-token", "token"]:
+                file_headers[key] = val
+
         response = requests.get(
             url, 
-            headers=session_headers, 
+            headers=file_headers, 
             impersonate="chrome", 
-            timeout=15
+            timeout=20
         )
         
         if response.status_code != 200:
@@ -77,7 +93,7 @@ def download_file(url, folder, session_headers):
 
         content_type = response.headers.get('Content-Type', '').lower()
         if 'text/html' in content_type:
-            print(f"[-] Media Download Blocked for {filename}. Server served HTML (gate wall) instead of an image/video.", flush=True)
+            print(f"[-] Media Download Blocked for {filename}. Asset server served HTML gate wall.", flush=True)
             return False
 
         with open(file_path, "wb") as f:
@@ -151,10 +167,7 @@ def main():
                 break 
 
             file_path = item.get("file_path")
-            
-            # DIAGNOSTIC: If the very first item lacks a 'file_path', print what keys actually exist
             if not file_path:
-                print(f"[-] Item {idx} missing 'file_path' key. Available keys in JSON are: {list(item.keys())}", flush=True)
                 continue
                 
             full_media_url = urljoin(MEDIA_BASE_URL, file_path)
@@ -163,8 +176,8 @@ def main():
             if download_file(full_media_url, DOWNLOAD_DIR, custom_headers):
                 total_files += 1
             
-            # Brief pause between individual files to look human
-            time.sleep(0.5)
+            # 1-second pause between file chunks to keep it safe and stable
+            time.sleep(1.0)
 
         current_page += 1
         time.sleep(DELAY_SECONDS)
