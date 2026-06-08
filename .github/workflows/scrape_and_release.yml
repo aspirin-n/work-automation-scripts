@@ -44,10 +44,8 @@ jobs:
         env:
           API_URL: ${{ inputs.api_url }}
           MEDIA_BASE_URL: ${{ inputs.media_base_url }}
-          START_PAGE: ${{ inputs.start_page }}
-          MAX_FILES: ${{ inputs.max_files }}
-          RAW_HEADERS: ${{ secrets.RAW_HEADERS }}  # <-- Securely fetches your hidden secret
-        run: python downloader.py
+          RAW_HEADERS: ${{ secrets.RAW_HEADERS }}
+        run: python -u downloader.py  # <-- The "-u" flag forces instant unbuffered logs
 
       - name: Zip the downloaded media
         run: |
