@@ -55,25 +55,29 @@ def download_file(url, folder, session_headers):
     try:
         url = url.strip()
         filename = url.split('/')[-1].split('?')[0]
-        if not filename: return False
+        if not filename: 
+            print("[-] Skipping: Could not parse a valid filename from URL.", flush=True)
+            return False
 
         file_path = os.path.join(folder, filename)
         if os.path.exists(file_path): 
+            print(f"[~] Already exists: {filename}", flush=True)
             return True
 
-        # Drop timeout to 10 seconds to stop firewall tarpits from freezing us
         response = requests.get(
             url, 
             headers=session_headers, 
             impersonate="chrome", 
-            timeout=10
+            timeout=15
         )
         
         if response.status_code != 200:
+            print(f"[-] Media Download Failed for {filename}. Status Code: {response.status_code}", flush=True)
             return False
 
         content_type = response.headers.get('Content-Type', '').lower()
         if 'text/html' in content_type:
+            print(f"[-] Media Download Blocked for {filename}. Server served HTML (gate wall) instead of an image/video.", flush=True)
             return False
 
         with open(file_path, "wb") as f:
@@ -82,7 +86,8 @@ def download_file(url, folder, session_headers):
         actual_size_kb = os.path.getsize(file_path) / 1024
         print(f"[+] Downloaded: {filename} ({actual_size_kb:.1f} KB)", flush=True)
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[-] Network error downloading {url}: {e}", flush=True)
         return False
 
 def get_api_page(page_num, session_headers):
@@ -94,21 +99,21 @@ def get_api_page(page_num, session_headers):
             target_url, 
             headers=session_headers, 
             impersonate="chrome", 
-            timeout=10  # Drop timeout to 10 seconds to prevent indefinite hangs
+            timeout=15
         )
         
         if response.status_code != 200:
-            print(f"[-] Server responded with Status Code: {response.status_code}", flush=True)
+            print(f"[-] API Server responded with Status Code: {response.status_code}", flush=True)
             return None
             
         content_type = response.headers.get('Content-Type', '').lower()
         if 'text/html' in content_type:
-            print(f"[-] Blocked: Server redirected request back to the verification wall.", flush=True)
+            print(f"[-] Blocked: Server redirected API request to verification wall.", flush=True)
             return None
 
         return response.json()
     except Exception as e:
-        print(f"[-] Request timed out or dropped by server firewall: {e}", flush=True)
+        print(f"[-] Request failed on API page {page_num}: {e}", flush=True)
         return None
 
 def main():
@@ -124,6 +129,7 @@ def main():
 
     while True:
         if MAX_FILES > 0 and total_files >= MAX_FILES:
+            print(f"\n[*] Hit global file limit ({MAX_FILES}). Stopping.", flush=True)
             break 
 
         print(f"\n[*] Processing Page {current_page}...", flush=True)
@@ -140,16 +146,25 @@ def main():
             
         print(f"[*] Found {len(medias)} items on page {current_page}.", flush=True)
 
-        for item in medias:
+        for idx, item in enumerate(medias):
             if MAX_FILES > 0 and total_files >= MAX_FILES:
                 break 
 
             file_path = item.get("file_path")
-            if not file_path: continue
+            
+            # DIAGNOSTIC: If the very first item lacks a 'file_path', print what keys actually exist
+            if not file_path:
+                print(f"[-] Item {idx} missing 'file_path' key. Available keys in JSON are: {list(item.keys())}", flush=True)
+                continue
                 
             full_media_url = urljoin(MEDIA_BASE_URL, file_path)
+            print(f"[*] Attempting file download: {full_media_url}", flush=True)
+            
             if download_file(full_media_url, DOWNLOAD_DIR, custom_headers):
                 total_files += 1
+            
+            # Brief pause between individual files to look human
+            time.sleep(0.5)
 
         current_page += 1
         time.sleep(DELAY_SECONDS)
