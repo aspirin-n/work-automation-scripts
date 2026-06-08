@@ -7,7 +7,7 @@ from curl_cffi import requests
 # --- CONFIGURATION via GITHUB ACTIONS ---
 API_URL = os.getenv("API_URL", "").strip().strip('"').strip("'")
 MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "").strip().strip('"').strip("'")
-COOKIE_STRING = os.getenv("COOKIE_STRING", "").strip()
+RAW_HEADERS_TEXT = os.getenv("RAW_HEADERS", "").strip()
 
 if not API_URL or not MEDIA_BASE_URL:
     print("[-] Error: API_URL or MEDIA_BASE_URL environment variable is missing.")
@@ -20,29 +20,30 @@ DOWNLOAD_DIR = "downloaded_media"
 DELAY_SECONDS = 1.0  
 # ----------------------------------------
 
+def parse_raw_headers(raw_text):
+    """Parses raw browser request headers into a valid dictionary."""
+    headers = {}
+    if not raw_text:
+        return headers
+        
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("GET ") or line.startswith("POST "):
+            continue  # Skip HTTP method lines
+        if ":" in line:
+            key, val = line.split(":", 1)
+            # Ignore pseudo-headers that curl_cffi generates natively
+            if key.strip().startswith(":"):
+                continue
+            headers[key.strip()] = val.strip()
+            
+    return headers
+
 def create_download_dir(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-def get_browser_headers():
-    """Generates a complete, flawless set of modern Chrome headers."""
-    headers = {
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": MEDIA_BASE_URL,
-        "Origin": MEDIA_BASE_URL,
-        "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-    }
-    if COOKIE_STRING:
-        headers["Cookie"] = COOKIE_STRING
-    return headers
-
-def download_file(url, folder):
+def download_file(url, folder, session_headers):
     try:
         url = url.strip()
         filename = url.split('/')[-1].split('?')[0]
@@ -55,7 +56,7 @@ def download_file(url, folder):
 
         response = requests.get(
             url, 
-            headers=get_browser_headers(), 
+            headers=session_headers, 
             impersonate="chrome", 
             timeout=30
         )
@@ -67,7 +68,6 @@ def download_file(url, folder):
         content_type = response.headers.get('Content-Type', '').lower()
         if 'text/html' in content_type:
             print(f"[-] Blocked on file download ({filename}). Server replied with HTML instead of media.")
-            print(f"[DIAGNOSTIC LOG] Server Response Snip:\n{response.text[:500]}\n---")
             return False
 
         with open(file_path, "wb") as f:
@@ -81,30 +81,43 @@ def download_file(url, folder):
         print(f"[-] Error downloading {url}: {e}")
         return False
 
-def get_api_page(page_num):
+def get_api_page(page_num, session_headers):
     target_url = API_URL.replace("{page}", str(page_num)).strip()
     
     try:
         print(f"[*] Fetching target: {target_url}")
         response = requests.get(
             target_url, 
-            headers=get_browser_headers(), 
+            headers=session_headers, 
             impersonate="chrome", 
             timeout=30
         )
         
         if response.status_code != 200:
             print(f"[-] API Page {page_num} returned Status Code: {response.status_code}")
-            print(f"[DIAGNOSTIC LOG] Server Response Snip:\n{response.text[:500]}\n---")
             return None
             
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' in content_type:
+            print(f"[-] Blocked: Server redirected API request to login/verification HTML page.")
+            print(f"[DIAGNOSTIC LOG] Response snippet:\n{response.text[:300]}\n---")
+            return None
+
         return response.json()
     except Exception as e:
         print(f"[-] Request crash on API page {page_num}: {e}")
         return None
 
 def main():
-    print("[*] Starting Diagnostic Chrome-Impersonation Scraper.")
+    print("[*] Starting Header-Cloned Scraper.")
+    
+    # Generate the header payload parsed from the browser clone
+    custom_headers = parse_raw_headers(RAW_HEADERS_TEXT)
+    if not custom_headers:
+        print("[!] Warning: No raw headers detected. Using basic requests.")
+    else:
+        print(f"[+] Successfully loaded {len(custom_headers)} browser authentication headers.")
+
     create_download_dir(DOWNLOAD_DIR)
     
     current_page = START_PAGE
@@ -116,7 +129,7 @@ def main():
             break 
 
         print(f"\n[*] Processing Page {current_page}...")
-        data = get_api_page(current_page)
+        data = get_api_page(current_page, custom_headers)
         
         if not data:
             print("[-] API read failed. Stopping execution.")
@@ -138,7 +151,7 @@ def main():
                 continue
                 
             full_media_url = urljoin(MEDIA_BASE_URL, file_path)
-            if download_file(full_media_url, DOWNLOAD_DIR):
+            if download_file(full_media_url, DOWNLOAD_DIR, custom_headers):
                 total_files += 1
 
         current_page += 1
