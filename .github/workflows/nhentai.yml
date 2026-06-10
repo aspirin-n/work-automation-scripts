@@ -1,0 +1,84 @@
+name: nhentai Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 'Gallery IDs or URLs separated by commas (e.g. 318259,579012,631467)'
+        required: true
+        type: string
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
+          pip3 install -U gallery-dl
+
+      - name: Download All Galleries
+        run: |
+          # Remove old zips
+          rm -f *.zip
+
+          # Split the input by commas and loop through each one
+          IFS=',' read -ra ITEMS <<< "${{ inputs.urls }}"
+
+          for ITEM in "${ITEMS[@]}"; do
+            # Remove spaces
+            ITEM=$(echo "$ITEM" | xargs)
+
+            # Skip if empty
+            if [ -z "$ITEM" ]; then continue; fi
+
+            # Get the ID number
+            ID=$(echo "$ITEM" | grep -oE '[0-9]+' | head -n1)
+            if [ -z "$ID" ]; then
+              echo "Skipping invalid input: $ITEM"
+              continue
+            fi
+
+            # Build URL if needed
+            if [[ "$ITEM" =~ ^[0-9]+$ ]]; then
+              URL="https://nhentai.net/g/${ID}"
+            else
+              URL="$ITEM"
+            fi
+
+            echo ""
+            echo "==============================="
+            echo "Downloading: $URL"
+            echo "==============================="
+
+            # Download
+            rm -rf "temp_dl"
+            mkdir -p "temp_dl/$ID"
+            gallery-dl --directory "./temp_dl/$ID" --filename "{num:03}.{extension}" "$URL"
+
+            # Zip it
+            zip -jr "${ID}.zip" "temp_dl/$ID"
+            rm -rf temp_dl
+
+            echo "Done: ${ID}.zip"
+          done
+
+          echo ""
+          echo "=== All downloads complete ==="
+          ls -lh *.zip
+
+      - name: Commit and Push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add *.zip
+          git commit -m "Add galleries: ${{ inputs.urls }}" || echo "No changes"
+          git push --force
