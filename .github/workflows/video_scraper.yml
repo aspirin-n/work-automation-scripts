@@ -47,10 +47,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade yt-dlp[default,curl_cffi]
 
-      - name: Execute Cloud Video Download
+      - - name: Execute Cloud Video Download
         run: |
-          # Build arguments dynamically based on your dashboard choices
-          ARGS="--impersonate chrome"
+          # Build arguments dynamically with impersonation, a spoofed referer, and cleared cookies
+          ARGS="--impersonate chrome --no-cookies --referer 'https://www.pornhub.com/'"
           
           # Handle Resolution
           if [ "${{ github.event.inputs.quality }}" = "720p" ]; then
