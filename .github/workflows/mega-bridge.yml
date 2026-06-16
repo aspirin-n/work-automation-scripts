@@ -23,25 +23,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # FIX: Create the directory beforehand so the action can find it
+      # Install Megatools directly from the Ubuntu repo
+      - name: Install Megatools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y megatools
+
       - name: Create Download Directory
         run: mkdir -p downloads
 
-      # Step 1: Download inside the pre-made folder
+      # megadl is strictly synchronous. It will block the runner until the download is done.
       - name: Download from MEGA
-        uses: Difegue/action-megacmd@master
-        with:
-          # Changed to absolute path reference inside the runner workspace
-          args: get '${{ github.event.inputs.mega_url }}' /github/workspace/downloads
+        run: |
+          cd downloads
+          megadl '${{ github.event.inputs.mega_url }}'
 
-      # Step 2: Package everything into a structured ZIP file
       - name: Zip Downloaded Content
         run: |
           cd downloads
           zip -r ../${{ github.event.inputs.release_name }}.zip .
           cd ..
 
-      # Step 3: Automatically push the finished file onto a GitHub Release
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
