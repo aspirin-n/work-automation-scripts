@@ -1,0 +1,51 @@
+name: MEGA Link Bridge Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      mega_url:
+        description: 'The MEGA.nz folder or file URL'
+        required: true
+        type: string
+      release_name:
+        description: 'Name for the output ZIP file & Release tag (e.g., my-assets)'
+        required: true
+        type: string
+
+permissions:
+  contents: write # Crucial permission allowing the runner to upload to Releases
+
+jobs:
+  bridge-download:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 1: Install and handle the extraction via official tools wrapper
+      - name: Download from MEGA
+        uses: Difegue/action-megacmd@master
+        with:
+          # We isolate the download into a clean "downloads" folder
+          args: get '${{ github.event.inputs.mega_url }}' ./downloads
+
+      # Step 2: Package everything into a structured ZIP file
+      - name: Zip Downloaded Content
+        run: |
+          cd downloads
+          zip -r ../${{ github.event.inputs.release_name }}.zip .
+          cd ..
+
+      # Step 3: Automatically push the finished file onto a GitHub Release
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_name }}-${{ github.run_id }}
+          name: "Bridge Export: ${{ github.event.inputs.release_name }}"
+          body: |
+            Automated export from MEGA link.
+            Original Link: `${{ github.event.inputs.mega_url }}`
+          files: ${{ github.event.inputs.release_name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Automatically provided by GitHub
