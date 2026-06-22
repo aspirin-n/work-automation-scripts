@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: 'Paste the Video, Playlist, or Channel URL'
+        description: 'Paste the Video, Playlist, or Channel URL(s) separated by a space'
         required: true
       quality:
         description: 'Select maximum video resolution'
@@ -47,6 +47,8 @@ jobs:
           pip install --user hanime-plugin
 
       - name: Execute Cloud Video Download
+        env:
+          TARGET_URLS: ${{ github.event.inputs.target_url }}
         run: |
           # Build arguments dynamically with impersonation, a spoofed referer, and cleared cookies
           ARGS="--impersonate chrome --no-cookies --referer 'https://www.pornhub.com/'"
@@ -60,9 +62,11 @@ jobs:
             ARGS="$ARGS -f bestaudio -x --audio-format mp3"
           fi
           
-         
-          # Run the downloader and output files to a 'downloads' folder
-          yt-dlp $ARGS -o "downloads/%(title)s.%(ext)s" "${{ github.event.inputs.target_url }}"
+          # Loop through each space-separated link and drop them in the downloads folder
+          for url in $TARGET_URLS; do
+            echo "Starting download for: $url"
+            yt-dlp $ARGS -o "downloads/%(title)s.%(ext)s" "$url"
+          done
 
       - name: Compress Video Files
         if: success()
