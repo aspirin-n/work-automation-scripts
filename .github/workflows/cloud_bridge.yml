@@ -1,0 +1,38 @@
+name: Cloud Media Bridge Capture
+
+on:
+  repository_dispatch:
+    types: [trigger_capture]
+
+jobs:
+  download_asset:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4
+
+      - name: Initialize Core Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-index: '3.11'
+
+      - name: Install Master Distribution Patches
+        run: |
+          pip install git+https://github.com/yt-dlp/yt-dlp.git@master
+
+      - name: Run Stream Capture Sequence
+        run: |
+          yt-dlp -vU \
+            --impersonate Chrome-110 \
+            --referer "https://www.pornhub.com/" \
+            --format "best" \
+            --output "media_asset.mp4" \
+            "${{ github.event.client_payload.video_url }}"
+
+      - name: Publish Compiled Asset to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "capture-${{ github.run_id }}"
+          files: media_asset.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
