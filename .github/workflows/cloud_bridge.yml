@@ -14,20 +14,34 @@ jobs:
       - name: Initialize Core Python Environment
         uses: actions/setup-python@v5
         with:
-          python-index: '3.11'
+          python-version: '3.11'
 
       - name: Install Master Distribution Patches
         run: |
           pip install git+https://github.com/yt-dlp/yt-dlp.git@master
 
-      - name: Run Stream Capture Sequence
+      - name: Run Intelligent Stream Capture
         run: |
+          INPUT_QUERY="${{ github.event.client_payload.query_input }}"
+          
+          # Check if the input is a direct link or needs a search prefix
+          if [[ "$INPUT_QUERY" == http* ]]; then
+            echo "Direct link detected. Initializing direct capture..."
+            TARGET_URL="$INPUT_QUERY"
+          else
+            echo "Search phrase detected. Routing through yt-dlp search engine..."
+            # 'phsearch:' tells yt-dlp to search the specific platform natively
+            TARGET_URL="phsearch:$INPUT_QUERY"
+          fi
+          
+          # Execute download utilizing GitHub's clean network line
           yt-dlp -vU \
             --impersonate Chrome-110 \
             --referer "https://www.pornhub.com/" \
             --format "best" \
+            --playlist-items 1 \
             --output "media_asset.mp4" \
-            "${{ github.event.client_payload.video_url }}"
+            "$TARGET_URL"
 
       - name: Publish Compiled Asset to GitHub Releases
         uses: softprops/action-gh-release@v2
