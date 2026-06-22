@@ -6,10 +6,6 @@ on:
       target_url:
         description: 'Paste the Video, Playlist, or Channel URL'
         required: true
-      max_videos:
-        description: 'Max videos to pull (if pasting a playlist/channel). Leave empty for single video.'
-        required: false
-        default: '1'
       quality:
         description: 'Select maximum video resolution'
         required: true
