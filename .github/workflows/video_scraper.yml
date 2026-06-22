@@ -64,11 +64,7 @@ jobs:
             ARGS="$ARGS -f bestaudio -x --audio-format mp3"
           fi
           
-          # Handle Max Downloads limit
-          if [ ! -z "${{ github.event.inputs.max_videos }}" ]; then
-            ARGS="$ARGS --max-downloads ${{ github.event.inputs.max_videos }}"
-          fi
-          
+         
           # Run the downloader and output files to a 'downloads' folder
           yt-dlp $ARGS -o "downloads/%(title)s.%(ext)s" "${{ github.event.inputs.target_url }}"
 
