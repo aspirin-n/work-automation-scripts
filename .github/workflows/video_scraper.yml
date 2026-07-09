@@ -6,6 +6,7 @@ on:
       target_url:
         description: 'Paste the Video, Playlist, or Channel URL(s) separated by a space'
         required: true
+
       quality:
         description: 'Select maximum video resolution'
         required: true
@@ -31,42 +32,86 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg zip
 
-      - name: Install yt-dlp and Impersonation Packages
+      - name: Install yt-dlp, Hanime Plugin, and Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --upgrade yt-dlp[default,curl_cffi]
+
+          python -m pip install --upgrade "yt-dlp[default,curl_cffi]"
+
+          python -m pip install --upgrade hanime-plugin
+
           curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
-          pip install --user hanime-plugin
+
+      - name: Verify Installation
+        run: |
+          echo "yt-dlp version:"
+          yt-dlp --version
+
+          echo "Python version:"
+          python --version
+
+          echo "Deno version:"
+          deno --version
+
+          echo "Hanime extractor check:"
+          yt-dlp --list-extractors | grep -i hanime || true
 
       - name: Execute Cloud Video Download
         env:
           TARGET_URLS: ${{ github.event.inputs.target_url }}
+
         run: |
-          # Build arguments dynamically with impersonation, a spoofed referer, and cleared cookies
-          ARGS="--impersonate chrome --no-cookies --referer 'https://www.pornhub.com/'"
-          
+
+          # Browser impersonation without fake referer
+          ARGS="--impersonate chrome \
+          --referer 'https://hanime.tv/' \
+          --retries infinite \
+          --fragment-retries infinite \
+          --file-access-retries infinite \
+          --sleep-interval 5 \
+          --max-sleep-interval 15 \
+          --downloader ffmpeg \
+          --verbose"
+
+
           # Handle Resolution
           if [ "${{ github.event.inputs.quality }}" = "720p" ]; then
             ARGS="$ARGS -f bestvideo[height<=720]+bestaudio/best[height<=720]"
+
           elif [ "${{ github.event.inputs.quality }}" = "480p" ]; then
             ARGS="$ARGS -f bestvideo[height<=480]+bestaudio/best[height<=480]"
+
           elif [ "${{ github.event.inputs.quality }}" = "audio-only (MP3)" ]; then
             ARGS="$ARGS -f bestaudio -x --audio-format mp3"
+
+          else
+            ARGS="$ARGS -f bestvideo+bestaudio/best"
           fi
-          
-          # Loop through each space-separated link and drop them in the downloads folder
+
+
+          mkdir -p downloads
+
+
+          # Download each URL
           for url in $TARGET_URLS; do
+            echo "======================================"
             echo "Starting download for: $url"
-            yt-dlp $ARGS -o "downloads/%(title)s.%(ext)s" "$url"
+            echo "======================================"
+
+            yt-dlp $ARGS \
+              -o "downloads/%(title)s.%(ext)s" \
+              "$url"
+
           done
+
 
       - name: Compress Video Files
         if: success()
@@ -78,13 +123,16 @@ jobs:
             exit 1
           fi
 
+
       - name: Publish Video to Releases
         if: success()
         uses: softprops/action-gh-release@v2
+
         with:
           tag_name: video-run-${{ github.run_number }}
           name: "Video Download #${{ github.run_number }}"
           body: "Cloud backup completed for: ${{ github.event.inputs.target_url }}"
           files: videos.zip
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
