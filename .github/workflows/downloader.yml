@@ -34,7 +34,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg zip
 
-      # Upgraded to Python 3.11 to fix deprecation warning
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -45,7 +44,6 @@ jobs:
         with:
           deno-version: v1.x
 
-      # Installs yt-dlp with the curl-cffi impersonation library
       - name: Install yt-dlp & plugin
         run: |
           python -m pip install --upgrade pip
@@ -54,23 +52,24 @@ jobs:
       - name: Download Video
         run: |
           QUALITY_INPUT="${{ github.event.inputs.quality }}"
-          
-          if [ "$QUALITY_INPUT" = "best" ]; then
-            FORMAT="best"
-          else
-            HEIGHT=$(echo "$QUALITY_INPUT" | sed 's/p//')
-            FORMAT="bestvideo[height<=${HEIGHT}]+bestaudio/best[height<=${HEIGHT}]"
-          fi
-          
-          echo "Selected Format: $FORMAT"
           mkdir -p downloads
           
-          # Added --impersonate chrome to spoof Cloudflare's TLS checks
-          yt-dlp \
-            --impersonate chrome \
-            -f "$FORMAT" \
-            -o "downloads/%(title)s.%(ext)s" \
-            "${{ github.event.inputs.video_url }}"
+          # If 'best' is selected, run default. 
+          # Otherwise, use format-sort (-S) to target the resolution with a safe fallback.
+          if [ "$QUALITY_INPUT" = "best" ]; then
+            yt-dlp \
+              --impersonate chrome \
+              -o "downloads/%(title)s.%(ext)s" \
+              "${{ github.event.inputs.video_url }}"
+          else
+            HEIGHT=$(echo "$QUALITY_INPUT" | sed 's/p//')
+            echo "Targeting height: ${HEIGHT}p with automatic fallback"
+            yt-dlp \
+              --impersonate chrome \
+              -S "res:${HEIGHT}" \
+              -o "downloads/%(title)s.%(ext)s" \
+              "${{ github.event.inputs.video_url }}"
+          fi
 
       - name: Package files
         id: package
