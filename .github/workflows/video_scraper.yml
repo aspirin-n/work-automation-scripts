@@ -40,15 +40,32 @@ jobs:
       - name: Install hanime-hunter
         run: |
           go install -ldflags "-s -w" github.com/acgtools/hanime-hunter@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Execute Download
         run: |
           mkdir -p downloads
           
-          # Run the Go CLI tool 'hani' to download
-          # -o: specify output directory, -q: specify video quality
-          hani dl \
+          # Locate the compiled binary directly in Go's bin folder
+          GOPATH_BIN=$(go env GOPATH)/bin
+          
+          if [ -f "$GOPATH_BIN/hanime-hunter" ]; then
+            BINARY="$GOPATH_BIN/hanime-hunter"
+          elif [ -f "$GOPATH_BIN/hani" ]; then
+            BINARY="$GOPATH_BIN/hani"
+          else
+            # Fallback to search for any compiled executable in the go bin folder
+            BINARY=$(find "$GOPATH_BIN" -maxdepth 1 -type f -executable | head -n 1)
+          fi
+
+          if [ -z "$BINARY" ]; then
+            echo "Error: Could not find the compiled binary in $GOPATH_BIN"
+            exit 1
+          fi
+
+          echo "Successfully located binary at: $BINARY"
+
+          # Execute the download using the absolute path
+          $BINARY dl \
             -o downloads \
             -q "${{ github.event.inputs.quality }}" \
             "${{ github.event.inputs.target_url }}"
