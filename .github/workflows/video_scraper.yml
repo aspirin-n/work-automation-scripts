@@ -87,9 +87,9 @@ jobs:
         env:
           TARGET_URLS: ${{ github.event.inputs.target_url }}
         run: |
-          # RESTORED "--impersonate chrome" to fix the 422 handshake error
-          ARGS="\
-          --impersonate chrome \
+          # Explicitly set the User-Agent so the WASM signer and curl_cffi stay in perfect sync
+          ARGS="--impersonate chrome \
+          --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' \
           --cookies cookies.txt \
           --referer https://hanime.tv/ \
           --retries 10 \
