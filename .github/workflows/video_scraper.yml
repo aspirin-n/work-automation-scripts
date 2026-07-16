@@ -24,6 +24,8 @@ jobs:
   download-video:
     runs-on: ubuntu-latest
 
+# ... (Keep the beginning of your workflow file exactly as it is)
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -31,21 +33,60 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg zip
 
-      - name: Install yt-dlp and Impersonation Packages
+      - name: Install yt-dlp, Hanime Plugin, and Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --upgrade yt-dlp[default,curl_cffi]
+          python -m pip install --upgrade "yt-dlp[default,curl_cffi]"
+          python -m pip install --upgrade hanime-plugin
+
           curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
-          pip install --user hanime-plugin
 
+      - name: Restore Browser Cookies
+        env:
+          HANIME_COOKIES: ${{ secrets.HANIME_COOKIES }}
+        run: |
+          if [ -z "$HANIME_COOKIES" ]; then
+            echo "HANIME_COOKIES secret is missing."
+            exit 1
+          fi
+
+          printf "%s" "$HANIME_COOKIES" > cookies.txt
+          chmod 600 cookies.txt
+
+      # ==========================================
+      # ADDED: Set up Cloudflare WARP to mask your Azure IP
+      # ==========================================
+      - name: Set up WARP
+        uses: fscarmen/warp-on-actions@v1.4
+        with:
+          stack: dual # Supports both IPv4 and IPv6 routing
+
+      - name: Verify Installation
+        run: |
+          echo "yt-dlp version:"
+          yt-dlp --version
+
+          echo "Python version:"
+          python --version
+
+          echo "Deno version:"
+          deno --version
+
+          echo "Checking our external IP address (should show Cloudflare WARP):"
+          curl ifconfig.me || true
+
+          echo "Hanime extractor:"
+          yt-dlp --list-extractors | grep -i hanime || true
+
+      # ... (Keep the rest of your download, compression, and release steps exactly the same)
       - name: Execute Cloud Video Download
         env:
           TARGET_URLS: ${{ github.event.inputs.target_url }}
