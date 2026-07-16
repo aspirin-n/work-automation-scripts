@@ -43,8 +43,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --upgrade "yt-dlp[default,curl_cffi]"
-          
-          # FIX 1: Install directly from Cynthia's GitHub repository for the absolute newest patches
           python -m pip install --upgrade git+https://github.com/cynthia2006/hanime-plugin.git
 
           curl -fsSL https://deno.land/install.sh | sh
@@ -89,14 +87,13 @@ jobs:
         env:
           TARGET_URLS: ${{ github.event.inputs.target_url }}
         run: |
-          # FIX 2: Removed "--downloader ffmpeg" to force yt-dlp's native downloader (which keeps headers intact)
+          # REMOVED "--impersonate chrome" to let the plugin manage its own handshake headers
           ARGS="\
-          --impersonate chrome \
           --cookies cookies.txt \
           --referer https://hanime.tv/ \
-          --retries infinite \
-          --fragment-retries infinite \
-          --file-access-retries infinite \
+          --retries 10 \
+          --fragment-retries 10 \
+          --file-access-retries 10 \
           --sleep-interval 5 \
           --max-sleep-interval 15 \
           --continue \
