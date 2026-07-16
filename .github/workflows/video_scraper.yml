@@ -48,17 +48,68 @@ jobs:
           curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
-      - name: Restore Browser Cookies
+      # SMART COOKIE GENERATOR: Converts whatever you pasted into a perfect Netscape file
+      - name: Parse and Generate Cookies File
         env:
           HANIME_COOKIES: ${{ secrets.HANIME_COOKIES }}
+        shell: python
         run: |
-          if [ -z "$HANIME_COOKIES" ]; then
-            echo "HANIME_COOKIES secret is missing."
-            exit 1
-          fi
+          import os
+          import re
+          import sys
 
-          printf "%s" "$HANIME_COOKIES" > cookies.txt
-          chmod 600 cookies.txt
+          raw_cookies = os.environ.get("HANIME_COOKIES", "").strip()
+          if not raw_cookies:
+              print("ERROR: HANIME_COOKIES secret is completely empty!")
+              sys.exit(1)
+
+          # Case 1: It's already a Netscape formatted cookie file
+          if "Netscape" in raw_cookies or "\t" in raw_cookies:
+              lines = raw_cookies.splitlines()
+              fixed_lines = []
+              for line in lines:
+                  if line.strip() == "" or line.startswith('#'):
+                      fixed_lines.append(line)
+                      continue
+                  parts = re.split(r'\s+', line.strip())
+                  if len(parts) >= 7:
+                      fixed_lines.append("\t".join(parts[:7]))
+                  else:
+                      fixed_lines.append(line)
+              with open("cookies.txt", "w") as f:
+                  f.write("\n".join(fixed_lines) + "\n")
+              print("SUCCESS: Detected and sanitized Netscape cookie format.")
+
+          # Case 2: It's a raw cookie header string or just a raw token
+          else:
+              token = None
+              if "=" in raw_cookies:
+                  # Parse typical HTTP Cookie header: key1=val1; active_session_token=val2
+                  cookie_parts = re.split(r';\s*', raw_cookies)
+                  for part in cookie_parts:
+                      if '=' in part:
+                          k, v = part.split('=', 1)
+                          if k.strip() == "active_session_token":
+                              token = v.strip()
+                              break
+              else:
+                  # User pasted just the raw token itself
+                  token = raw_cookies
+
+              if token:
+                  # Build a standard, flawless Netscape cookie file manually
+                  cookie_content = (
+                      "# Netscape HTTP Cookie File\n"
+                      f".hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
+                      f"hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
+                      f"auth.hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
+                  )
+                  with open("cookies.txt", "w") as f:
+                      f.write(cookie_content)
+                  print(f"SUCCESS: Generated Netscape cookies.txt using token: {token[:4]}...{token[-4:] if len(token) > 8 else ''}")
+              else:
+                  print("ERROR: Could not find 'active_session_token' in your pasted secret.")
+                  sys.exit(1)
 
       - name: Set up WARP
         uses: fscarmen/warp-on-actions@v1.4
@@ -87,7 +138,6 @@ jobs:
         env:
           TARGET_URLS: ${{ github.event.inputs.target_url }}
         run: |
-          # Explicitly set the User-Agent so the WASM signer and curl_cffi stay in perfect sync
           ARGS="--impersonate chrome \
           --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' \
           --cookies cookies.txt \
