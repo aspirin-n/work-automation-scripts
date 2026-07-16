@@ -1,43 +1,3 @@
-Since you mentioned you are too lazy to dig into the code yourself, I went ahead and did the diagnostic work for you!
-
-There are two major reasons why the workflow is still failing, and both point to issues in how the plugin and downloaders are being called in your current setup.
-
----
-
-## 1. Why It is Still Failing
-
-### Issue A: Outdated PyPI Package (The "Plugin" Bug)
-
-Your workflow currently runs:
-
-```bash
-python -m pip install --upgrade hanime-plugin
-
-```
-
-This pulls the plugin from **PyPI** (the Python Package Index). Creators of niche scraping plugins rarely update PyPI every time a website changes its code. Instead, they push hotfixes directly to their GitHub repository (`cynthia2006/hanime-plugin`).
-
-When Hanime updates its video player or API, the PyPI version breaks and returns 0 valid formats, resulting in the `Requested format is not available` error. Installing directly from the master branch of their GitHub repository is the only way to get their latest fixes.
-
-### Issue B: The `--downloader ffmpeg` Trait
-
-In your `ARGS`, you have `--downloader ffmpeg` active.
-While `yt-dlp` successfully bypasses the site's initial block (thanks to WARP and Chrome impersonation), when it hands the actual `.m3u8` video segments over to `ffmpeg` to download, **`ffmpeg` does not inherit your cookies, the impersonated Chrome headers, or the WARP proxy configurations.**
-
-The website's CDN sees a raw `ffmpeg` client request and immediately blocks it (403), leaving `yt-dlp` with 0 completed streams to parse. Since Hanime's streams are already pre-merged video and audio files, **you don't even need ffmpeg to download them**—`yt-dlp`'s native downloader is much safer and respects all of your bypass headers.
-
----
-
-## The Solution
-
-To fix this once and for all, we will:
-
-1. Force pip to install the absolute latest code directly from **Cynthia's GitHub repository** instead of PyPI.
-2. Remove `--downloader ffmpeg` so `yt-dlp` uses its native, highly-stealthy downloader.
-
-Here is your updated, 100% copy-pastable workflow:
-
-```yaml
 name: Cloud Video Downloader
 
 on:
@@ -189,5 +149,3 @@ jobs:
           files: videos.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-```
