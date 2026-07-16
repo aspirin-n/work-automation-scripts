@@ -87,8 +87,9 @@ jobs:
         env:
           TARGET_URLS: ${{ github.event.inputs.target_url }}
         run: |
-          # REMOVED "--impersonate chrome" to let the plugin manage its own handshake headers
+          # RESTORED "--impersonate chrome" to fix the 422 handshake error
           ARGS="\
+          --impersonate chrome \
           --cookies cookies.txt \
           --referer https://hanime.tv/ \
           --retries 10 \
