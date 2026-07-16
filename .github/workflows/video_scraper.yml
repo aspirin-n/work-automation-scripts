@@ -43,13 +43,32 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --upgrade "yt-dlp[default,curl_cffi]"
-          
-          # Stable PyPI version which doesn't crash on handshake
           python -m pip install --upgrade hanime-plugin
 
           curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
+      # HOTFIX: Dynamically patch the plugin's code to use the modern cookie schema
+      - name: Hotfix Plugin Database Schema
+        shell: python
+        run: |
+          import yt_dlp_plugins.extractor.htv as htv
+          
+          file_path = htv.__file__
+          print(f"Locating plugin file to patch: {file_path}")
+          
+          with open(file_path, 'r') as f:
+              code = f.read()
+          
+          # Force swap the outdated cookie name with the active session cookie name
+          patched_code = code.replace('active_session_token', 'htv_session')
+          
+          with open(file_path, 'w') as f:
+              f.write(patched_code)
+              
+          print("SUCCESS: Dynamic plugin patch applied!")
+
+      # SMART COOKIE GENERATOR: Parses and maps session tokens to both names
       - name: Parse and Generate Cookies File
         env:
           HANIME_COOKIES: ${{ secrets.HANIME_COOKIES }}
@@ -64,49 +83,45 @@ jobs:
               print("ERROR: HANIME_COOKIES secret is completely empty!")
               sys.exit(1)
 
+          token = None
+
+          # Try to extract a token value
           if "Netscape" in raw_cookies or "\t" in raw_cookies:
-              lines = raw_cookies.splitlines()
-              fixed_lines = []
-              for line in lines:
-                  if line.strip() == "" or line.startswith('#'):
-                      fixed_lines.append(line)
-                      continue
-                  parts = re.split(r'\s+', line.strip())
-                  if len(parts) >= 7:
-                      fixed_lines.append("\t".join(parts[:7]))
-                  else:
-                      fixed_lines.append(line)
-              with open("cookies.txt", "w") as f:
-                  f.write("\n".join(fixed_lines) + "\n")
-              print("SUCCESS: Cookie file generated.")
+              for line in raw_cookies.splitlines():
+                  if "htv_session" in line or "active_session_token" in line:
+                      parts = re.split(r'\s+', line.strip())
+                      if len(parts) >= 7:
+                          token = parts[6]
+                          break
+          elif "=" in raw_cookies:
+              cookie_parts = re.split(r';\s*', raw_cookies)
+              for part in cookie_parts:
+                  if '=' in part:
+                      k, v = part.split('=', 1)
+                      if k.strip() in ["htv_session", "active_session_token"]:
+                          token = v.strip()
+                          break
           else:
-              token = None
-              if "=" in raw_cookies:
-                  cookie_parts = re.split(r';\s*', raw_cookies)
-                  for part in cookie_parts:
-                      if '=' in part:
-                          k, v = part.split('=', 1)
-                          if k.strip() == "active_session_token":
-                              token = v.strip()
-                              break
-              else:
-                  token = raw_cookies
+              token = raw_cookies
 
-              if token:
-                  cookie_content = (
-                      "# Netscape HTTP Cookie File\n"
-                      f".hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
-                      f"hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
-                      f"auth.hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
-                  )
-                  with open("cookies.txt", "w") as f:
-                      f.write(cookie_content)
-                  print("SUCCESS: Cookie file generated from raw token.")
-              else:
-                  print("ERROR: Could not find 'active_session_token' in your secret.")
-                  sys.exit(1)
+          if token:
+              # Map the token value to BOTH cookie keys to be completely safe
+              cookie_content = (
+                  "# Netscape HTTP Cookie File\n"
+                  f".hanime.tv\tTRUE\t/\tTRUE\t2051222400\thtv_session\t{token}\n"
+                  f".hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
+                  f"hanime.tv\tTRUE\t/\tTRUE\t2051222400\thtv_session\t{token}\n"
+                  f"hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
+                  f"auth.hanime.tv\tTRUE\t/\tTRUE\t2051222400\thtv_session\t{token}\n"
+                  f"auth.hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
+              )
+              with open("cookies.txt", "w") as f:
+                  f.write(cookie_content)
+              print("SUCCESS: Cookie file written with dual key fallbacks.")
+          else:
+              print("ERROR: No valid token could be extracted from your secret.")
+              sys.exit(1)
 
-      # DIAGNOSTIC: Prints exactly what cookies yt-dlp has loaded
       - name: Verify yt-dlp Cookie Loading
         shell: python
         run: |
@@ -130,7 +145,6 @@ jobs:
               print(f"❌ Diagnostic failed: {e}")
               sys.exit(1)
 
-      # FIX: Forced IPv4 only to prevent Azure WireGuard routing hang
       - name: Set up WARP
         uses: fscarmen/warp-on-actions@v1.4
         with:
