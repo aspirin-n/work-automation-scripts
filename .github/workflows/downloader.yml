@@ -1,0 +1,101 @@
+name: Video Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'The URL of the video to download'
+        required: true
+        type: string
+      quality:
+        description: 'Desired quality'
+        required: true
+        default: '720p'
+        type: choice
+        options:
+          - 'best'
+          - '1080p'
+          - '720p'
+          - '480p'
+          - '360p'
+
+jobs:
+  download-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Crucial for creating releases and uploading files
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Installs system tools required for merging streams and zipping
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg zip
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # Deno is required by cynthia2006/hanime-plugin for page extraction
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v1.x
+
+      - name: Install yt-dlp & plugin
+        run: |
+          python -m pip install --upgrade pip
+          pip install yt-dlp hanime-plugin
+
+      - name: Download Video
+        run: |
+          QUALITY_INPUT="${{ github.event.inputs.quality }}"
+          
+          # Map selection to a yt-dlp format string
+          if [ "$QUALITY_INPUT" = "best" ]; then
+            FORMAT="best"
+          else
+            # Strip the 'p' to get the height (e.g., 720)
+            HEIGHT=$(echo "$QUALITY_INPUT" | sed 's/p//')
+            FORMAT="bestvideo[height<=${HEIGHT}]+bestaudio/best[height<=${HEIGHT}]"
+          fi
+          
+          echo "Selected Format: $FORMAT"
+          mkdir -p downloads
+          
+          # Run yt-dlp with the hanime plugin loaded
+          yt-dlp -f "$FORMAT" -o "downloads/%(title)s.%(ext)s" "${{ github.event.inputs.video_url }}"
+
+      - name: Package files
+        id: package
+        run: |
+          # Create a unique tag name using the current date and time
+          TAG_NAME="vid-$(date +'%Y%m%d-%H%M%S')"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          
+          # Compress downloaded files into a zip archive
+          cd downloads
+          if [ "$(ls -A)" ]; then
+            zip -r ../videos.zip .
+            echo "FILES_EXIST=true" >> $GITHUB_ENV
+          else
+            echo "No files downloaded! Check the logs above for extraction errors."
+            echo "FILES_EXIST=false" >> $GITHUB_ENV
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        if: env.FILES_EXIST == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "Downloaded Video (${{ env.TAG_NAME }})"
+          files: videos.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
