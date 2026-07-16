@@ -39,16 +39,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg zip
 
-      - name: Install yt-dlp, Latest Hanime Plugin, and Dependencies
+      - name: Install yt-dlp, Stable Hanime Plugin, and Dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install --upgrade "yt-dlp[default,curl_cffi]"
-          python -m pip install --upgrade git+https://github.com/cynthia2006/hanime-plugin.git
+          
+          # Stable PyPI version which doesn't crash on handshake
+          python -m pip install --upgrade hanime-plugin
 
           curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
-      # SMART COOKIE GENERATOR: Converts whatever you pasted into a perfect Netscape file
       - name: Parse and Generate Cookies File
         env:
           HANIME_COOKIES: ${{ secrets.HANIME_COOKIES }}
@@ -63,7 +64,6 @@ jobs:
               print("ERROR: HANIME_COOKIES secret is completely empty!")
               sys.exit(1)
 
-          # Case 1: It's already a Netscape formatted cookie file
           if "Netscape" in raw_cookies or "\t" in raw_cookies:
               lines = raw_cookies.splitlines()
               fixed_lines = []
@@ -78,13 +78,10 @@ jobs:
                       fixed_lines.append(line)
               with open("cookies.txt", "w") as f:
                   f.write("\n".join(fixed_lines) + "\n")
-              print("SUCCESS: Detected and sanitized Netscape cookie format.")
-
-          # Case 2: It's a raw cookie header string or just a raw token
+              print("SUCCESS: Cookie file generated.")
           else:
               token = None
               if "=" in raw_cookies:
-                  # Parse typical HTTP Cookie header: key1=val1; active_session_token=val2
                   cookie_parts = re.split(r';\s*', raw_cookies)
                   for part in cookie_parts:
                       if '=' in part:
@@ -93,11 +90,9 @@ jobs:
                               token = v.strip()
                               break
               else:
-                  # User pasted just the raw token itself
                   token = raw_cookies
 
               if token:
-                  # Build a standard, flawless Netscape cookie file manually
                   cookie_content = (
                       "# Netscape HTTP Cookie File\n"
                       f".hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
@@ -106,15 +101,40 @@ jobs:
                   )
                   with open("cookies.txt", "w") as f:
                       f.write(cookie_content)
-                  print(f"SUCCESS: Generated Netscape cookies.txt using token: {token[:4]}...{token[-4:] if len(token) > 8 else ''}")
+                  print("SUCCESS: Cookie file generated from raw token.")
               else:
-                  print("ERROR: Could not find 'active_session_token' in your pasted secret.")
+                  print("ERROR: Could not find 'active_session_token' in your secret.")
                   sys.exit(1)
 
+      # DIAGNOSTIC: Prints exactly what cookies yt-dlp has loaded
+      - name: Verify yt-dlp Cookie Loading
+        shell: python
+        run: |
+          import yt_dlp
+          import sys
+          try:
+              ydl = yt_dlp.YoutubeDL({'cookiefile': 'cookies.txt', 'quiet': True})
+              cookies = list(ydl.cookiejar)
+              print("=== YT-DLP COOKIE JAR DIAGNOSTICS ===")
+              if not cookies:
+                  print("❌ yt-dlp failed to load any cookies from cookies.txt!")
+                  sys.exit(1)
+              else:
+                  print(f"✅ yt-dlp successfully loaded {len(cookies)} cookies:")
+                  for c in cookies:
+                      val = c.value
+                      masked = f"{val[:4]}...{val[-4:]}" if len(val) > 8 else "***"
+                      print(f"   • Domain: {c.domain} | Cookie Name: {c.name} | Value: {masked}")
+              print("======================================")
+          except Exception as e:
+              print(f"❌ Diagnostic failed: {e}")
+              sys.exit(1)
+
+      # FIX: Forced IPv4 only to prevent Azure WireGuard routing hang
       - name: Set up WARP
         uses: fscarmen/warp-on-actions@v1.4
         with:
-          stack: dual
+          stack: ipv4
 
       - name: Verify Installation & IP
         run: |
@@ -139,7 +159,6 @@ jobs:
           TARGET_URLS: ${{ github.event.inputs.target_url }}
         run: |
           ARGS="--impersonate chrome \
-          --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' \
           --cookies cookies.txt \
           --referer https://hanime.tv/ \
           --retries 10 \
