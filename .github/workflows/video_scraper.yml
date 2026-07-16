@@ -1,30 +1,11 @@
 name: Cloud Video Downloader
 
-on:
-workflow_dispatch:
-inputs:
-target_url:
-description: 'Paste the Video, Playlist, or Channel URL(s) separated by a space'
-required: true
-quality:
-description: 'Select maximum video resolution'
-required: true
-default: '720p'
-type: choice
-options:
-- 'best'
-- '720p'
-- '480p'
-- 'audio-only (MP3)'
+on:workflow_dispatch:inputs:target_url:description: 'Paste the Video, Playlist, or Channel URL(s) separated by a space'required: truequality:description: 'Select maximum video resolution'required: truedefault: '720p'type: choiceoptions:- 'best'- '720p'- '480p'- 'audio-only (MP3)'
 
-permissions:
-contents: write
+permissions:contents: write
 
-jobs:
-download-video:
-runs-on: ubuntu-latest
+jobs:download-video:runs-on: ubuntu-latest
 
-```
 steps:
   - name: Checkout Repository
     uses: actions/checkout@v4
@@ -89,4 +70,3 @@ steps:
       files: videos.zip
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
