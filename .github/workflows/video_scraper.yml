@@ -68,7 +68,7 @@ jobs:
               
           print("SUCCESS: Dynamic plugin patch applied!")
 
-      # SMART COOKIE GENERATOR: Parses and maps session tokens to both names
+      # SMART COOKIE GENERATOR: Parses and matches the strict Python cookiejar rules
       - name: Parse and Generate Cookies File
         env:
           HANIME_COOKIES: ${{ secrets.HANIME_COOKIES }}
@@ -82,6 +82,12 @@ jobs:
           if not raw_cookies:
               print("ERROR: HANIME_COOKIES secret is completely empty!")
               sys.exit(1)
+
+          # Helper to safely construct a valid cookie row conforming to python's cookiejar assertion
+          def make_cookie_row(domain, key, val):
+              # Python cookiejar rule: If domain starts with a dot, col 2 must be TRUE. Otherwise FALSE.
+              subdomains_flag = "TRUE" if domain.startswith('.') else "FALSE"
+              return f"{domain}\t{subdomains_flag}\t/\tTRUE\t2051222400\t{key}\t{val}\n"
 
           token = None
 
@@ -105,19 +111,24 @@ jobs:
               token = raw_cookies
 
           if token:
-              # Map the token value to BOTH cookie keys to be completely safe
-              cookie_content = (
-                  "# Netscape HTTP Cookie File\n"
-                  f".hanime.tv\tTRUE\t/\tTRUE\t2051222400\thtv_session\t{token}\n"
-                  f".hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
-                  f"hanime.tv\tTRUE\t/\tTRUE\t2051222400\thtv_session\t{token}\n"
-                  f"hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
-                  f"auth.hanime.tv\tTRUE\t/\tTRUE\t2051222400\thtv_session\t{token}\n"
-                  f"auth.hanime.tv\tTRUE\t/\tTRUE\t2051222400\tactive_session_token\t{token}\n"
-              )
+              # Create a clean cookie file strictly conforming to Python's MozillaCookieJar constraints
+              cookie_content = "# Netscape HTTP Cookie File\n"
+              
+              # .hanime.tv -> TRUE (Matches domain + all subdomains)
+              cookie_content += make_cookie_row(".hanime.tv", "htv_session", token)
+              cookie_content += make_cookie_row(".hanime.tv", "active_session_token", token)
+              
+              # hanime.tv -> FALSE (Matches exactly domain only)
+              cookie_content += make_cookie_row("hanime.tv", "htv_session", token)
+              cookie_content += make_cookie_row("hanime.tv", "active_session_token", token)
+              
+              # auth.hanime.tv -> FALSE (Matches exactly auth subdomain only)
+              cookie_content += make_cookie_row("auth.hanime.tv", "htv_session", token)
+              cookie_content += make_cookie_row("auth.hanime.tv", "active_session_token", token)
+
               with open("cookies.txt", "w") as f:
                   f.write(cookie_content)
-              print("SUCCESS: Cookie file written with dual key fallbacks.")
+              print("SUCCESS: Cookie file written with perfectly structured subdomain mappings.")
           else:
               print("ERROR: No valid token could be extracted from your secret.")
               sys.exit(1)
