@@ -1,20 +1,22 @@
-name: Cloud Video Downloader (Hani-Hunter)
+name: Cloud Video Downloader
 
 on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: 'Paste the hanime.tv video URL'
+        description: 'Paste the Video, Playlist, or Channel URL(s) separated by a space'
         required: true
+
       quality:
         description: 'Select maximum video resolution'
         required: true
         default: '720p'
         type: choice
         options:
-          - '1080p'
+          - 'best'
           - '720p'
           - '480p'
+          - 'audio-only (MP3)'
 
 permissions:
   contents: write
@@ -27,48 +29,96 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          go-version: 'stable'
+          python-version: '3.11'
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg zip
 
-      - name: Install hanime-hunter
+      - name: Install yt-dlp, Hanime Plugin, and Dependencies
         run: |
-          go install -ldflags "-s -w" github.com/acgtools/hanime-hunter@latest
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade "yt-dlp[default,curl_cffi]"
+          python -m pip install --upgrade hanime-plugin
 
-      - name: Execute Download
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+
+      - name: Restore Browser Cookies
+        env:
+          HANIME_COOKIES: ${{ secrets.HANIME_COOKIES }}
         run: |
-          mkdir -p downloads
-          
-          # Locate the compiled binary directly in Go's bin folder
-          GOPATH_BIN=$(go env GOPATH)/bin
-          
-          if [ -f "$GOPATH_BIN/hanime-hunter" ]; then
-            BINARY="$GOPATH_BIN/hanime-hunter"
-          elif [ -f "$GOPATH_BIN/hani" ]; then
-            BINARY="$GOPATH_BIN/hani"
-          else
-            # Fallback to search for any compiled executable in the go bin folder
-            BINARY=$(find "$GOPATH_BIN" -maxdepth 1 -type f -executable | head -n 1)
-          fi
-
-          if [ -z "$BINARY" ]; then
-            echo "Error: Could not find the compiled binary in $GOPATH_BIN"
+          if [ -z "$HANIME_COOKIES" ]; then
+            echo "HANIME_COOKIES secret is missing."
             exit 1
           fi
 
-          echo "Successfully located binary at: $BINARY"
+          printf "%s" "$HANIME_COOKIES" > cookies.txt
+          chmod 600 cookies.txt
 
-          # Execute the download using the absolute path
-          $BINARY dl \
-            -o downloads \
-            -q "${{ github.event.inputs.quality }}" \
-            "${{ github.event.inputs.target_url }}"
+      - name: Verify Installation
+        run: |
+          echo "yt-dlp version:"
+          yt-dlp --version
+
+          echo "Python version:"
+          python --version
+
+          echo "Deno version:"
+          deno --version
+
+          echo "Hanime extractor:"
+          yt-dlp --list-extractors | grep -i hanime || true
+
+      - name: Execute Cloud Video Download
+        env:
+          TARGET_URLS: ${{ github.event.inputs.target_url }}
+
+        run: |
+
+          ARGS="\
+          --impersonate chrome \
+          --cookies cookies.txt \
+          --referer https://hanime.tv/ \
+          --retries infinite \
+          --fragment-retries infinite \
+          --file-access-retries infinite \
+          --sleep-interval 5 \
+          --max-sleep-interval 15 \
+          --downloader ffmpeg \
+          --continue \
+          --no-part \
+          --verbose"
+
+          # Handle Resolution
+          if [ "${{ github.event.inputs.quality }}" = "720p" ]; then
+            ARGS="$ARGS -f bestvideo[height<=720]+bestaudio/best[height<=720]"
+
+          elif [ "${{ github.event.inputs.quality }}" = "480p" ]; then
+            ARGS="$ARGS -f bestvideo[height<=480]+bestaudio/best[height<=480]"
+
+          elif [ "${{ github.event.inputs.quality }}" = "audio-only (MP3)" ]; then
+            ARGS="$ARGS -f bestaudio -x --audio-format mp3"
+
+          else
+            ARGS="$ARGS -f bestvideo+bestaudio/best"
+          fi
+
+          mkdir -p downloads
+
+          for url in $TARGET_URLS; do
+            echo "======================================"
+            echo "Starting download for: $url"
+            echo "======================================"
+
+            yt-dlp $ARGS \
+              -o "downloads/%(title)s.%(ext)s" \
+              "$url"
+          done
 
       - name: Compress Video Files
         if: success()
