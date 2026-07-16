@@ -1,22 +1,20 @@
-name: Cloud Video Downloader
+name: Cloud Video Downloader (Hani-Hunter)
 
 on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: 'Paste the Video, Playlist, or Channel URL(s) separated by a space'
+        description: 'Paste the hanime.tv video URL'
         required: true
-
       quality:
         description: 'Select maximum video resolution'
         required: true
-        default: '480p'
+        default: '720p'
         type: choice
         options:
-          - 'best'
+          - '1080p'
           - '720p'
           - '480p'
-          - 'audio-only (MP3)'
 
 permissions:
   contents: write
@@ -29,197 +27,31 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          python-version: '3.11'
+          go-version: 'stable'
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg zip
 
-      - name: Install yt-dlp, Stable Hanime Plugin, and Dependencies
+      - name: Install hanime-hunter
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade "yt-dlp[default,curl_cffi]"
-          python -m pip install --upgrade hanime-plugin
+          go install -ldflags "-s -w" github.com/acgtools/hanime-hunter@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-          curl -fsSL https://deno.land/install.sh | sh
-          echo "$HOME/.deno/bin" >> $GITHUB_PATH
-
-      # HOTFIX: Dynamically patch the plugin's code to use the modern cookie schema
-      - name: Hotfix Plugin Database Schema
-        shell: python
+      - name: Execute Download
         run: |
-          import yt_dlp_plugins.extractor.htv as htv
-          
-          file_path = htv.__file__
-          print(f"Locating plugin file to patch: {file_path}")
-          
-          with open(file_path, 'r') as f:
-              code = f.read()
-          
-          # Force swap the outdated cookie name with the active session cookie name
-          patched_code = code.replace('active_session_token', 'htv_session')
-          
-          with open(file_path, 'w') as f:
-              f.write(patched_code)
-              
-          print("SUCCESS: Dynamic plugin patch applied!")
-
-      # SMART COOKIE GENERATOR: Parses and matches the strict Python cookiejar rules
-      - name: Parse and Generate Cookies File
-        env:
-          HANIME_COOKIES: ${{ secrets.HANIME_COOKIES }}
-        shell: python
-        run: |
-          import os
-          import re
-          import sys
-
-          raw_cookies = os.environ.get("HANIME_COOKIES", "").strip()
-          if not raw_cookies:
-              print("ERROR: HANIME_COOKIES secret is completely empty!")
-              sys.exit(1)
-
-          # Helper to safely construct a valid cookie row conforming to python's cookiejar assertion
-          def make_cookie_row(domain, key, val):
-              # Python cookiejar rule: If domain starts with a dot, col 2 must be TRUE. Otherwise FALSE.
-              subdomains_flag = "TRUE" if domain.startswith('.') else "FALSE"
-              return f"{domain}\t{subdomains_flag}\t/\tTRUE\t2051222400\t{key}\t{val}\n"
-
-          token = None
-
-          # Try to extract a token value
-          if "Netscape" in raw_cookies or "\t" in raw_cookies:
-              for line in raw_cookies.splitlines():
-                  if "htv_session" in line or "active_session_token" in line:
-                      parts = re.split(r'\s+', line.strip())
-                      if len(parts) >= 7:
-                          token = parts[6]
-                          break
-          elif "=" in raw_cookies:
-              cookie_parts = re.split(r';\s*', raw_cookies)
-              for part in cookie_parts:
-                  if '=' in part:
-                      k, v = part.split('=', 1)
-                      if k.strip() in ["htv_session", "active_session_token"]:
-                          token = v.strip()
-                          break
-          else:
-              token = raw_cookies
-
-          if token:
-              # Create a clean cookie file strictly conforming to Python's MozillaCookieJar constraints
-              cookie_content = "# Netscape HTTP Cookie File\n"
-              
-              # .hanime.tv -> TRUE (Matches domain + all subdomains)
-              cookie_content += make_cookie_row(".hanime.tv", "htv_session", token)
-              cookie_content += make_cookie_row(".hanime.tv", "active_session_token", token)
-              
-              # hanime.tv -> FALSE (Matches exactly domain only)
-              cookie_content += make_cookie_row("hanime.tv", "htv_session", token)
-              cookie_content += make_cookie_row("hanime.tv", "active_session_token", token)
-              
-              # auth.hanime.tv -> FALSE (Matches exactly auth subdomain only)
-              cookie_content += make_cookie_row("auth.hanime.tv", "htv_session", token)
-              cookie_content += make_cookie_row("auth.hanime.tv", "active_session_token", token)
-
-              with open("cookies.txt", "w") as f:
-                  f.write(cookie_content)
-              print("SUCCESS: Cookie file written with perfectly structured subdomain mappings.")
-          else:
-              print("ERROR: No valid token could be extracted from your secret.")
-              sys.exit(1)
-
-      - name: Verify yt-dlp Cookie Loading
-        shell: python
-        run: |
-          import yt_dlp
-          import sys
-          try:
-              ydl = yt_dlp.YoutubeDL({'cookiefile': 'cookies.txt', 'quiet': True})
-              cookies = list(ydl.cookiejar)
-              print("=== YT-DLP COOKIE JAR DIAGNOSTICS ===")
-              if not cookies:
-                  print("❌ yt-dlp failed to load any cookies from cookies.txt!")
-                  sys.exit(1)
-              else:
-                  print(f"✅ yt-dlp successfully loaded {len(cookies)} cookies:")
-                  for c in cookies:
-                      val = c.value
-                      masked = f"{val[:4]}...{val[-4:]}" if len(val) > 8 else "***"
-                      print(f"   • Domain: {c.domain} | Cookie Name: {c.name} | Value: {masked}")
-              print("======================================")
-          except Exception as e:
-              print(f"❌ Diagnostic failed: {e}")
-              sys.exit(1)
-
-      - name: Set up WARP
-        uses: fscarmen/warp-on-actions@v1.4
-        with:
-          stack: ipv4
-
-      - name: Verify Installation & IP
-        run: |
-          echo "yt-dlp version:"
-          yt-dlp --version
-
-          echo "Python version:"
-          python --version
-
-          echo "Deno version:"
-          deno --version
-
-          echo "Your Action's External IP (Should show Cloudflare WARP):"
-          curl -s ifconfig.me || true
-          echo ""
-
-          echo "Hanime extractor:"
-          yt-dlp --list-extractors | grep -i hanime || true
-
-      - name: Execute Cloud Video Download
-        env:
-          TARGET_URLS: ${{ github.event.inputs.target_url }}
-        run: |
-          ARGS="--impersonate chrome \
-          --cookies cookies.txt \
-          --referer https://hanime.tv/ \
-          --retries 10 \
-          --fragment-retries 10 \
-          --file-access-retries 10 \
-          --sleep-interval 5 \
-          --max-sleep-interval 15 \
-          --continue \
-          --no-part \
-          --verbose"
-
-          # Handle Resolution with Fallbacks
-          if [ "${{ github.event.inputs.quality }}" = "720p" ]; then
-            ARGS="$ARGS -f 720p/720/best[height<=720]/best"
-
-          elif [ "${{ github.event.inputs.quality }}" = "480p" ]; then
-            ARGS="$ARGS -f 480p/480/best[height<=480]/best"
-
-          elif [ "${{ github.event.inputs.quality }}" = "audio-only (MP3)" ]; then
-            ARGS="$ARGS -f bestaudio/best -x --audio-format mp3"
-
-          else
-            ARGS="$ARGS -f best"
-          fi
-
           mkdir -p downloads
-
-          for url in $TARGET_URLS; do
-            echo "======================================"
-            echo "Starting download for: $url"
-            echo "======================================"
-
-            yt-dlp $ARGS \
-              -o "downloads/%(title)s.%(ext)s" \
-              "$url"
-          done
+          
+          # Run the Go CLI tool 'hani' to download
+          # -o: specify output directory, -q: specify video quality
+          hani dl \
+            -o downloads \
+            -q "${{ github.event.inputs.quality }}" \
+            "${{ github.event.inputs.target_url }}"
 
       - name: Compress Video Files
         if: success()
