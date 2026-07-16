@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'The URL of the video to download'
+        description: 'Paste one or more URLs (separated by a space)'
         required: true
         type: string
       quality:
@@ -49,27 +49,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install "yt-dlp[default,curl-cffi]" hanime-plugin
 
-      - name: Download Video
+      - name: Download Videos
         run: |
           QUALITY_INPUT="${{ github.event.inputs.quality }}"
           mkdir -p downloads
           
-          # If 'best' is selected, run default. 
-          # Otherwise, use format-sort (-S) to target the resolution with a safe fallback.
-          if [ "$QUALITY_INPUT" = "best" ]; then
-            yt-dlp \
-              --impersonate chrome \
-              -o "downloads/%(title)s.%(ext)s" \
-              "${{ github.event.inputs.video_url }}"
-          else
-            HEIGHT=$(echo "$QUALITY_INPUT" | sed 's/p//')
-            echo "Targeting height: ${HEIGHT}p with automatic fallback"
-            yt-dlp \
-              --impersonate chrome \
-              -S "res:${HEIGHT}" \
-              -o "downloads/%(title)s.%(ext)s" \
-              "${{ github.event.inputs.video_url }}"
-          fi
+          # Initialize release notes markdown file
+          echo "### Downloaded Sources" > release_notes.md
+          echo "This release contains the video files downloaded from the following links:" >> release_notes.md
+          echo "" >> release_notes.md
+          
+          # Safely read space-separated URLs into a Bash array
+          read -ra URLS <<< "${{ github.event.inputs.video_url }}"
+          
+          # Loop through each URL in the array
+          for URL in "${URLS[@]}"; do
+            echo "----------------------------------------"
+            echo "Processing: $URL"
+            echo "----------------------------------------"
+            
+            # Setup download arguments dynamically
+            ARGS=(--impersonate chrome -o "downloads/%(title)s.%(ext)s")
+            if [ "$QUALITY_INPUT" != "best" ]; then
+              HEIGHT=$(echo "$QUALITY_INPUT" | sed 's/p//')
+              echo "Targeting height: ${HEIGHT}p with automatic fallback"
+              ARGS+=(-S "res:${HEIGHT}")
+            fi
+            
+            # Run yt-dlp and check if successful to update release notes
+            if yt-dlp "${ARGS[@]}" "$URL"; then
+              echo "* $URL - **Success**" >> release_notes.md
+            else
+              echo "* ~~$URL~~ - **Failed**" >> release_notes.md
+            fi
+          done
 
       - name: Package files
         id: package
@@ -92,7 +105,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
-          name: "Downloaded Video (${{ env.TAG_NAME }})"
+          name: "Downloaded Videos (${{ env.TAG_NAME }})"
+          body_path: release_notes.md # Reads the generated file for release notes
           files: videos.zip
           draft: false
           prerelease: false
