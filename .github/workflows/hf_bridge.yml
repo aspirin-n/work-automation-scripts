@@ -1,73 +1,72 @@
-name: Civitai to HuggingFace
+name: Download HF File, Split, and Release
 
 on:
   workflow_dispatch:
     inputs:
-      civitai_url:
-        description: 'Civitai Download URL'
+      hf_url:
+        description: 'Direct HF File URL (e.g., https://huggingface.co/org/repo/resolve/main/model.gguf)'
         required: true
         type: string
-      filename:
-        description: 'Filename (e.g. model.gguf)'
+      tag_name:
+        description: 'GitHub Release Tag Name (e.g., v1.0.0 or model-q8)'
         required: true
-        default: 'model.safetensors'
-      hf_repo:
-        description: 'Your HuggingFace Dataset Name'
-        required: true
-        default: 'my-storage'
+        type: string
+      chunk_size:
+        description: 'Chunk size (e.g., 1800M or 1.8G)'
+        required: false
+        default: '1800M'
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
-  transfer:
+  process-and-release:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Install Dependencies
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget
-          pip install huggingface_hub
+          sudo apt-get install -y aria2
 
-      - name: Download from Civitai
-        env:
-          CIVITAI_TOKEN: ${{ secrets.CIVITAI_API_KEY }}
-          CIVITAI_URL: ${{ inputs.civitai_url }}
-          FILENAME: ${{ inputs.filename }}
+      - name: Download File from Hugging Face
         run: |
-          echo "Starting download..."
+          echo "Downloading from: ${{ inputs.hf_url }}"
           
-          wget \
-            --header="Authorization: Bearer $CIVITAI_TOKEN" \
-            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-            --content-disposition \
-            -O "$FILENAME" \
-            "$CIVITAI_URL"
+          # Extract the base filename from the URL (strip any query params)
+          FILENAME=$(basename "${{ inputs.hf_url }}" | cut -d'?' -f1)
+          echo "FILENAME=$FILENAME" >> $GITHUB_ENV
           
-          echo ""
-          echo "=== Download Complete ==="
-          ls -lh "$FILENAME"
+          # Download using 16 connections for fast transfer speeds
+          aria2c -x 16 -s 16 -o "$FILENAME" "${{ inputs.hf_url }}"
 
-      - name: Upload to HuggingFace
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          FILENAME: ${{ inputs.filename }}
-          HF_REPO: ${{ inputs.hf_repo }}
+      - name: Split File into Chunks
         run: |
-          echo "Uploading to HuggingFace..."
-          python3 << 'EOF'
-          from huggingface_hub import HfApi
-          import os
+          mkdir -p dist
+          echo "Splitting $FILENAME into ${{ inputs.chunk_size }} chunks..."
+          
+          # Generate files named: filename.gguf.part00, filename.gguf.part01, etc.
+          split -b ${{ inputs.chunk_size }} -d -a 2 "$FILENAME" "dist/${FILENAME}.part"
 
-          api = HfApi()
-          token = os.environ["HF_TOKEN"]
-          filename = os.environ["FILENAME"]
-          repo = os.environ["HF_REPO"]
+          echo "Generated chunks:"
+          ls -lh dist/
 
-          api.upload_file(
-              path_or_fileobj=filename,
-              path_in_repo=filename,
-              repo_id=f"Arashm1386/{repo}",
-              repo_type="dataset",
-              token=token
-          )
-          print("Upload complete!")
-          print(f"https://huggingface.co/datasets/Arashm1386/{repo}/resolve/main/{filename}")
-          EOF
+      - name: Create Release and Upload Chunks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.tag_name }}"
+          
+          # Create release if it doesn't exist yet
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Creating new release: $TAG"
+            gh release create "$TAG" --title "Release $TAG" --notes "Uploaded chunks from Hugging Face: ${{ inputs.hf_url }}"
+          fi
+
+          # Upload all chunk files to the release
+          echo "Uploading chunks..."
+          gh release upload "$TAG" dist/* --clobber
